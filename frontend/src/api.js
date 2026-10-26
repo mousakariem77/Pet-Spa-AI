@@ -7,7 +7,7 @@ export const setToken = (t) => (t ? localStorage.setItem(TOKEN_KEY, t) : localSt
 
 export class ApiError extends Error {
   constructor(status, body) {
-    super(body?.detail || 'Có lỗi xảy ra.')
+    super(body?.detail || body?.error || (typeof body === 'string' ? body : 'Có lỗi xảy ra.'))
     this.status = status
     this.code = body?.code
     this.fields = body?.fields || {}

@@ -33,10 +33,13 @@ class Specialty(models.Model):
 
     code = models.CharField(max_length=50, unique=True)
     name_vi = models.CharField('Tên chuyên môn', max_length=100)
+    species_scope = models.CharField('Áp dụng cho loài', max_length=10, choices=SpeciesScope.choices, default=SpeciesScope.BOTH)
+    description = models.TextField('Mô tả chuyên môn', blank=True, default='')
 
     class Meta:
         verbose_name = 'Chuyên môn'
         verbose_name_plural = 'Chuyên môn'
+        ordering = ['id']
 
     def __str__(self):
         return self.name_vi

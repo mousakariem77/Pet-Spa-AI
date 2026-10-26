@@ -1,4 +1,4 @@
-﻿from django.conf import settings
+from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
 
@@ -43,6 +43,14 @@ class StaffProfile(models.Model):
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='staff_profile')
     specialties = models.ManyToManyField('catalog.Specialty', blank=True, related_name='staff')
+    class Gender(models.TextChoices):
+        MALE = 'male', 'Nam'
+        FEMALE = 'female', 'Nữ'
+        OTHER = 'other', 'Khác'
+
+    birthday = models.DateField('Ngày sinh', null=True, blank=True)
+    gender = models.CharField('Giới tính', max_length=10, choices=Gender.choices, default=Gender.OTHER, blank=True)
+    address = models.CharField('Địa chỉ', max_length=300, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:

@@ -69,18 +69,18 @@ PACKAGES = [
      ['cat_spa', 'ear_clean', 'bath_unscented']),
 ]
 
-# tên, SĐT, tài khoản (nếu có)
+# tên, SĐT chính, SĐT phụ/Zalo, ngày sinh, tài khoản (nếu có)
 CLIENTS = [
-    ('Nguyễn Thu Hà', '0901000001', 'khach1'),
-    ('Trần Minh Quân', '0901000002', None),
-    ('Lê Phương Anh', '0901000003', None),
-    ('Phạm Quốc Bảo', '0901000004', None),
-    ('Võ Ngọc Diệp', '0901000005', None),
-    ('Đặng Hoài Nam', '0901000006', None),
-    ('Bùi Khánh Linh', '0901000007', None),
-    ('Hoàng Gia Huy', '0901000008', None),
-    ('Ngô Thanh Mai', '0901000009', None),
-    ('Đỗ Tuấn Kiệt', '0901000010', None),
+    ('Nguyễn Thu Hà', '0901234567', '0909888111', date(1994, 5, 12), 'khach1'),
+    ('Trần Minh Quân', '0912345678', '0988222333', date(1990, 8, 20), None),
+    ('Lê Phương Anh', '0983456789', '0977333444', date(1996, 11, 3), None),
+    ('Phạm Quốc Bảo', '0974567890', '', date(1988, 3, 15), None),
+    ('Võ Ngọc Diệp', '0935678901', '0911555666', date(1995, 7, 28), None),
+    ('Đặng Hoài Nam', '0866789012', '', date(1992, 12, 10), None),
+    ('Bùi Khánh Linh', '0887890123', '0933777888', date(1998, 9, 25), None),
+    ('Hoàng Gia Huy', '0778901234', '', date(1993, 1, 18), None),
+    ('Ngô Thanh Mai', '0359012345', '0855999000', date(1997, 6, 30), None),
+    ('Đỗ Tuấn Kiệt', '0389123456', '', date(1991, 10, 5), None),
 ]
 
 # chủ (index), tên, loài, giống, lông, sinh cách đây (tháng), cân nặng, thẻ, dị ứng, tiêm phòng?
@@ -154,10 +154,11 @@ class Command(BaseCommand):
         self._staff_and_resources()
         self._bookings()
         self._ai_data()
+        self._seed_notifications()
 
     def _spa(self):
         Spa.objects.update_or_create(id=1, defaults=dict(
-            name='Spa Thú Y Lông Mượt', phone='0283000000', email='lienhe@longmuot.example',
+            name='Spa Thú Y Lông Mượt', phone='02838229999', email='lienhe@longmuot.example',
             address='25 Lê Văn Thịnh, P. Bình Trưng Tây, TP. Thủ Đức, TP.HCM',
             open_time=time(8, 0), close_time=time(19, 0), open_weekdays=[0, 1, 2, 3, 4, 5, 6],
             slot_minutes=30, cancel_cutoff_hours=2,
@@ -165,11 +166,11 @@ class Command(BaseCommand):
 
     def _users(self):
         rows = [
-            ('quanly', 'Chủ spa Lông Mượt', Role.MANAGER, '0902000001'),
-            ('letan', 'Nguyễn Lễ Tân', Role.RECEPTIONIST, '0902000002'),
-            ('ktv1', 'Kỹ thuật viên Tắm', Role.TECHNICIAN, '0902000003'),
-            ('ktv2', 'Kỹ thuật viên Cắt Poodle', Role.TECHNICIAN, '0902000004'),
-            ('ktv3', 'Kỹ thuật viên Spa mèo', Role.TECHNICIAN, '0902000005'),
+            ('quanly', 'Chủ spa Lông Mượt', Role.MANAGER, '0909111222'),
+            ('letan', 'Nguyễn Lễ Tân', Role.RECEPTIONIST, '0908222333'),
+            ('ktv1', 'Kỹ thuật viên Tắm', Role.TECHNICIAN, '0907333444'),
+            ('ktv2', 'Kỹ thuật viên Cắt Poodle', Role.TECHNICIAN, '0906444555'),
+            ('ktv3', 'Kỹ thuật viên Spa mèo', Role.TECHNICIAN, '0905555666'),
         ]
         for username, full_name, role, phone in rows:
             user, _ = User.objects.get_or_create(username=username)
@@ -226,16 +227,34 @@ class Command(BaseCommand):
 
     def _clients_and_pets(self, tags):
         clients = []
-        for name, phone, username in CLIENTS:
+        for name, phone, sec_phone, bday, username in CLIENTS:
             user = None
             if username:
                 user, _ = User.objects.get_or_create(username=username)
                 user.full_name, user.role, user.phone = name, Role.CUSTOMER, phone
                 user.set_password(DEMO_PASSWORD)
                 user.save()
-            client, _ = Client.objects.update_or_create(phone=phone, defaults=dict(
-                full_name=name, user=user, source=Client.Source.ONLINE if user else Client.Source.WALK_IN,
-                is_active=True))
+
+            client = None
+            if user:
+                client = Client.objects.filter(user=user).first()
+            if not client:
+                client = Client.objects.filter(full_name=name).first()
+
+            if client:
+                client.phone = phone
+                client.secondary_phone = sec_phone
+                client.birthday = bday
+                client.full_name = name
+                client.user = user
+                client.source = Client.Source.ONLINE if user else Client.Source.WALK_IN
+                client.is_active = True
+                client.save()
+            else:
+                client, _ = Client.objects.update_or_create(phone=phone, defaults=dict(
+                    full_name=name, secondary_phone=sec_phone, birthday=bday,
+                    user=user, source=Client.Source.ONLINE if user else Client.Source.WALK_IN,
+                    is_active=True))
             clients.append(client)
 
         for owner, name, species, breed, coat, age_m, weight, tag_codes, allergy, vaccinated in PETS:
@@ -388,4 +407,137 @@ class Command(BaseCommand):
 
         # 4. Quét và tạo các bản ghi nhắc tái spa mẫu
         ai_services.generate_rebook_reminders()
+
+    def _seed_notifications(self):
+        """Tạo dữ liệu mẫu thông báo chuẩn vai trò cho từng nhóm người dùng."""
+        from notifications.models import Notification
+
+        Notification.objects.all().delete()
+        users = {u.username: u for u in User.objects.all()}
+        items = []
+
+        # 1. Khách hàng (khach1 - Nguyễn Thu Hà)
+        if 'khach1' in users:
+            u = users['khach1']
+            items.extend([
+                Notification(
+                    user=u,
+                    kind='booking_confirmed',
+                    title='Lịch hẹn bé Bông đã được xác nhận',
+                    body='Lịch hẹn tắm sấy lúc 09:30 ngày mai của bé Bông đã được xác nhận và xếp Kỹ thuật viên.',
+                    ref_type='booking',
+                    link='/app/lich-hen',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='rebook_reminder',
+                    title='Nhắc lịch spa định kỳ cho bé Mimi',
+                    body='Đã 3 tuần kể từ lần spa gần nhất của bé Mimi. Đặt lịch sớm để nhận ưu đãi và khung giờ ưng ý!',
+                    ref_type='reminder',
+                    link='/app/nhac-tai-spa',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='invoice_paid',
+                    title='Thanh toán thành công',
+                    body='Đã xác nhận thanh toán hóa đơn dịch vụ #1 số tiền 150.000đ. Cảm ơn bạn đã tin tưởng dịch vụ!',
+                    ref_type='invoice',
+                    link='/app/hoa-don',
+                    is_read=True,
+                ),
+                Notification(
+                    user=u,
+                    kind='booking_completed',
+                    title='Bé Mimi đã làm spa xong!',
+                    body='Dịch vụ của bé Mimi đã hoàn tất thơm tho, mời bạn ghé quầy lễ tân để đón bé.',
+                    ref_type='booking',
+                    link='/app/lich-hen',
+                    is_read=True,
+                ),
+            ])
+
+        # 2. Quản lý (quanly - Chủ spa)
+        if 'quanly' in users:
+            u = users['quanly']
+            items.extend([
+                Notification(
+                    user=u,
+                    kind='booking_new',
+                    title='Lịch hẹn mới chờ duyệt',
+                    body='Khách hàng Nguyễn Thu Hà vừa đặt lịch Tắm dưỡng cho bé Bông trên website.',
+                    ref_type='booking',
+                    link='/app/lich-hen',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='staff_timeoff',
+                    title='Đơn xin nghỉ phép mới',
+                    body='Kỹ thuật viên Kiều Nghiên gửi đơn xin nghỉ phép 1 ngày (28/10). Vui lòng xét duyệt.',
+                    ref_type='staff',
+                    link='/app/nhan-su',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='system',
+                    title='Báo cáo doanh thu tuần',
+                    body='Doanh thu tuần này đạt 18.500.000đ, tăng 15% so với tuần trước. Xem chi tiết tại Thống kê.',
+                    ref_type='analytics',
+                    link='/app/thong-ke',
+                    is_read=True,
+                ),
+            ])
+
+        # 3. Lễ tân (letan)
+        if 'letan' in users:
+            u = users['letan']
+            items.extend([
+                Notification(
+                    user=u,
+                    kind='booking_new',
+                    title='Lịch hẹn mới chờ duyệt',
+                    body='Bé Bông đặt lịch Tắm dưỡng vào 10:00 ngày mai. Vui lòng kiểm tra và duyệt lịch.',
+                    ref_type='booking',
+                    link='/app/lich-hen',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='booking_completed',
+                    title='Dịch vụ hoàn tất, chờ thu tiền',
+                    body='Bé Mimi đã xong dịch vụ tại phòng spa, sẵn sàng xuất hóa đơn và thu tiền khách.',
+                    ref_type='booking',
+                    link='/app/hoa-don',
+                    is_read=False,
+                ),
+            ])
+
+        # 4. Kỹ thuật viên (ktv1)
+        if 'ktv1' in users:
+            u = users['ktv1']
+            items.extend([
+                Notification(
+                    user=u,
+                    kind='booking_assigned',
+                    title='Bạn được giao một lịch hẹn mới',
+                    body='Ca phục vụ bé Bông - Dịch vụ Tắm cơ bản lúc 09:30 ngày mai.',
+                    ref_type='booking',
+                    link='/app/lich-hen',
+                    is_read=False,
+                ),
+                Notification(
+                    user=u,
+                    kind='staff_timeoff_status',
+                    title='Đơn nghỉ phép đã được phê duyệt',
+                    body='Quản lý đã phê duyệt đơn xin nghỉ phép ngày 28/10 của bạn.',
+                    ref_type='staff',
+                    link='/app/nhan-su',
+                    is_read=True,
+                ),
+            ])
+
+        Notification.objects.bulk_create(items)
 

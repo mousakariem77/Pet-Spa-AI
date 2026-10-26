@@ -15,6 +15,7 @@ import { api, money, toFormErrors, unwrap } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import AiPackageModal from '../components/AiPackageModal.jsx'
 import RowPerPageSelect from '../components/RowPerPageSelect.jsx'
+import PetAvatar from '../components/PetAvatar.jsx'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -307,19 +308,22 @@ export default function Bookings() {
       title: 'Bé cưng',
       key: 'pet',
       render: (_, b) => (
-        <div>
-          <a
-            style={{ fontWeight: 700, color: '#0f8b8d', fontSize: 15, cursor: 'pointer' }}
-            onClick={() => nav(`/app/thu-cung?q=${b.pet_info?.name}`)}
-            title="Bấm để xem hồ sơ bé cưng này"
-          >
-            🐾 {b.pet_info?.name}
-          </a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <PetAvatar species={b.pet_info?.species} size={36} />
           <div>
-            <Tag color={b.pet_info?.species === 'dog' ? 'blue' : 'purple'}>
-              {b.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'} ({b.pet_info?.size_class || '—'})
-            </Tag>
-            <Text type="secondary" style={{ fontSize: 12 }}>{b.pet_info?.breed}</Text>
+            <a
+              style={{ fontWeight: 700, color: '#0f8b8d', fontSize: 14, cursor: 'pointer' }}
+              onClick={() => nav(`/app/thu-cung?q=${b.pet_info?.name}`)}
+              title="Bấm để xem hồ sơ bé cưng này"
+            >
+              {b.pet_info?.name}
+            </a>
+            <div>
+              <Tag color={b.pet_info?.species === 'dog' ? 'blue' : 'purple'}>
+                {b.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'} ({b.pet_info?.size_class || '—'})
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>{b.pet_info?.breed}</Text>
+            </div>
           </div>
         </div>
       ),
@@ -520,14 +524,19 @@ export default function Bookings() {
             {/* Thông tin chính */}
             <Descriptions bordered column={1} size="small">
               <Descriptions.Item label="Bé cưng">
-                <a
-                  style={{ fontWeight: 700, color: '#0f8b8d', cursor: 'pointer', fontSize: 15 }}
-                  onClick={() => { setDetailOpen(false); nav(`/app/thu-cung?q=${detailBooking.pet_info?.name}`) }}
-                  title="Xem hồ sơ chi tiết bé cưng này"
-                >
-                  🐾 {detailBooking.pet_info?.name}
-                </a> ({detailBooking.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'} - {detailBooking.pet_info?.breed || 'Chưa rõ giống'})
-                <div><Tag color="cyan">Size: {detailBooking.pet_info?.size_class}</Tag></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <PetAvatar species={detailBooking.pet_info?.species} size={40} />
+                  <div>
+                    <a
+                      style={{ fontWeight: 700, color: '#0f8b8d', cursor: 'pointer', fontSize: 15 }}
+                      onClick={() => { setDetailOpen(false); nav(`/app/thu-cung?q=${detailBooking.pet_info?.name}`) }}
+                      title="Xem hồ sơ chi tiết bé cưng này"
+                    >
+                      {detailBooking.pet_info?.name}
+                    </a> ({detailBooking.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'} - {detailBooking.pet_info?.breed || 'Chưa rõ giống'})
+                    <div><Tag color="cyan">Size: {detailBooking.pet_info?.size_class}</Tag></div>
+                  </div>
+                </div>
               </Descriptions.Item>
               <Descriptions.Item label="Chủ thú">
                 <a

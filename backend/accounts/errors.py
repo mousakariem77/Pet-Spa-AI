@@ -19,8 +19,23 @@ def api_exception_handler(exc, context):
         return None
 
     if isinstance(exc, exceptions.ValidationError):
+        error_msg = 'Dữ liệu không hợp lệ.'
+        if isinstance(response.data, dict):
+            if 'non_field_errors' in response.data and response.data['non_field_errors']:
+                error_msg = str(response.data['non_field_errors'][0])
+            elif 'detail' in response.data:
+                error_msg = str(response.data['detail'])
+            else:
+                first_val = next(iter(response.data.values()), None)
+                if isinstance(first_val, list) and first_val:
+                    error_msg = str(first_val[0])
+                elif first_val:
+                    error_msg = str(first_val)
+        elif isinstance(response.data, list) and response.data:
+            error_msg = str(response.data[0])
+
         return Response(
-            {'code': 'validation_error', 'detail': 'Dữ liệu không hợp lệ.', 'fields': response.data},
+            {'code': 'validation_error', 'detail': error_msg, 'fields': response.data},
             status=422,
         )
 

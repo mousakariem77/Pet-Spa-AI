@@ -215,9 +215,18 @@ class RoleScopeTests(BaseCase):
     def test_dashboard_front_desk_only_and_revenue_matches_invoices(self):
         self.assertEqual(self.as_user('khach1').get(f'{API}/dashboard/today').status_code, 403)
         self.assertEqual(self.as_user('ktv1').get(f'{API}/dashboard/today').status_code, 403)
+        self.assertEqual(self.as_user('khach1').get(f'{API}/dashboard/daily').status_code, 403)
         r = self.as_user('letan').get(f'{API}/dashboard/today')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['unpaid_count'], Invoice.objects.filter(status='unpaid').count())
+        self.assertIn('feed', r.data)
+        self.assertIn('staff_on_duty', r.data)
+        self.assertIn('resources_summary', r.data)
+        self.assertIn('in_service_count', r.data)
+        # Quản lý cũng có quyền xem dashboard ngày
+        r_mgr = self.as_user('quanly').get(f'{API}/dashboard/daily')
+        self.assertEqual(r_mgr.status_code, 200)
+        self.assertIn('feed', r_mgr.data)
 
     def test_notifications_are_private(self):
         n = Notification.objects.create(user=self.users['letan'], kind='x', title='t')
@@ -227,10 +236,16 @@ class RoleScopeTests(BaseCase):
 
 class StaffTests(BaseCase):
     def test_only_manager_creates_staff(self):
-        body = dict(username='ktv9', password='Demo@12345', full_name='KTV Mới', role='technician')
+        body = dict(
+            username='ktv9', password='Demo@12345', full_name='KTV Mới', role='technician',
+            birthday='1995-05-20', gender='female', address='123 Lê Lợi, Q.1, TP.HCM'
+        )
         self.assertEqual(self.as_user('letan').post(f'{API}/staff', body, format='json').status_code, 403)
         r = self.as_user('quanly').post(f'{API}/staff', body, format='json')
         self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['birthday'], '1995-05-20')
+        self.assertEqual(r.data['gender'], 'female')
+        self.assertEqual(r.data['address'], '123 Lê Lợi, Q.1, TP.HCM')
         self.assertTrue(User.objects.get(username='ktv9').check_password('Demo@12345'))
         # trùng tên đăng nhập
         self.assertEqual(self.as_user('quanly').post(f'{API}/staff', body, format='json').status_code, 422)

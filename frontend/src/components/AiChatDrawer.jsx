@@ -28,6 +28,117 @@ export default function AiChatDrawer() {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
 
+  // Drag state: Không lưu vào localStorage để mỗi lần reload trang luôn trở về vị trí mặc định
+  const [position, setPosition] = useState(null) // null = vị trí mặc định theo CSS (bottom: 24px, right: 24px)
+  const [isDragging, setIsDragging] = useState(false)
+  const bubbleRef = useRef(null)
+  const dragInfoRef = useRef({
+    startX: 0,
+    startY: 0,
+    elemStartX: 0,
+    elemStartY: 0,
+    width: 0,
+    height: 0,
+    hasMoved: false,
+  })
+
+  // Đảm bảo bong bóng không bị lọt ra ngoài màn hình khi co giãn cửa sổ
+  useEffect(() => {
+    const handleResize = () => {
+      setPosition((prev) => {
+        if (!prev || !bubbleRef.current) return prev
+        const rect = bubbleRef.current.getBoundingClientRect()
+        const padding = 12
+        const maxX = Math.max(padding, window.innerWidth - rect.width - padding)
+        const maxY = Math.max(padding, window.innerHeight - rect.height - padding)
+        const clampedX = Math.max(padding, Math.min(prev.x, maxX))
+        const clampedY = Math.max(padding, Math.min(prev.y, maxY))
+        if (clampedX === prev.x && clampedY === prev.y) return prev
+        return { x: clampedX, y: clampedY }
+      })
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const startDrag = (clientX, clientY) => {
+    if (!bubbleRef.current) return
+    const rect = bubbleRef.current.getBoundingClientRect()
+
+    dragInfoRef.current = {
+      startX: clientX,
+      startY: clientY,
+      elemStartX: rect.left,
+      elemStartY: rect.top,
+      width: rect.width,
+      height: rect.height,
+      hasMoved: false,
+    }
+
+    const onMouseMove = (e) => {
+      moveDrag(e.clientX, e.clientY)
+    }
+
+    const onTouchMove = (e) => {
+      if (e.touches && e.touches.length > 0) {
+        moveDrag(e.touches[0].clientX, e.touches[0].clientY)
+      }
+    }
+
+    const endDrag = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', endDrag)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', endDrag)
+      setIsDragging(false)
+      // Giữ cờ hasMoved thêm 50ms để chặn sự kiện onClick mở modal nhầm
+      setTimeout(() => {
+        dragInfoRef.current.hasMoved = false
+      }, 50)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', endDrag)
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('touchend', endDrag)
+  }
+
+  const moveDrag = (clientX, clientY) => {
+    const { startX, startY, elemStartX, elemStartY, width, height, hasMoved } = dragInfoRef.current
+    const dx = clientX - startX
+    const dy = clientY - startY
+
+    // Ngưỡng di chuyển tối thiểu để phân biệt click thường và kéo chuột
+    if (!hasMoved && Math.hypot(dx, dy) < 5) {
+      return
+    }
+
+    dragInfoRef.current.hasMoved = true
+    setIsDragging(true)
+
+    const padding = 12
+    const bubbleW = width || 64
+    const bubbleH = height || 64
+    const maxX = Math.max(padding, window.innerWidth - bubbleW - padding)
+    const maxY = Math.max(padding, window.innerHeight - bubbleH - padding)
+
+    const rawX = elemStartX + dx
+    const rawY = elemStartY + dy
+
+    const clampedX = Math.max(padding, Math.min(rawX, maxX))
+    const clampedY = Math.max(padding, Math.min(rawY, maxY))
+
+    setPosition({ x: clampedX, y: clampedY })
+  }
+
+  const handleBubbleClick = (e) => {
+    if (dragInfoRef.current.hasMoved) {
+      e.stopPropagation()
+      return
+    }
+    setOpen(true)
+  }
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -81,16 +192,42 @@ export default function AiChatDrawer() {
     setInput(q)
   }
 
+  const isLeft = position ? position.x < 160 : false
+  const bubbleStyle = {
+    ...(position
+      ? {
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          right: 'auto',
+          bottom: 'auto',
+        }
+      : {}),
+    flexDirection: isLeft ? 'row-reverse' : 'row',
+    touchAction: 'none',
+  }
+
   return (
     <>
-      {/* Bong bóng Chat AI nổi bật với Avatar AI sắc nét */}
+      {/* Bong bóng Chat AI nổi bật với Avatar AI sắc nét - Có thể kéo di chuyển linh hoạt */}
       <div
         id="ai-chat-bubble"
-        className="ai-chat-bubble-wrap"
-        onClick={() => setOpen(true)}
+        ref={bubbleRef}
+        className={`ai-chat-bubble-wrap ${isDragging ? 'is-dragging' : ''}`}
+        style={bubbleStyle}
+        onClick={handleBubbleClick}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return // chỉ nhận chuột trái
+          startDrag(e.clientX, e.clientY)
+        }}
+        onTouchStart={(e) => {
+          if (e.touches && e.touches.length > 0) {
+            startDrag(e.touches[0].clientX, e.touches[0].clientY)
+          }
+        }}
         role="button"
         tabIndex={0}
         aria-label="Mở Trợ lý AI Pet Spa"
+        title="Kéo để di chuyển vị trí bong bóng AI"
       >
         <span className="ai-chat-bubble-label">Hỏi Trợ lý AI</span>
         <div className="ai-chat-bubble-btn">
@@ -98,6 +235,7 @@ export default function AiChatDrawer() {
             src="/images/ai_avatar.jpg"
             alt="Trợ lý AI Pet Spa"
             className="ai-chat-bubble-avatar"
+            draggable={false}
           />
           <span className="ai-chat-bubble-status" title="Sẵn sàng hỗ trợ" />
           <span className="ai-chat-bubble-badge">AI</span>

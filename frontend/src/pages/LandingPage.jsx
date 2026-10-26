@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, money, unwrap } from '../api.js'
 import { useAuth, ROLE_LABEL } from '../auth.jsx'
 import AiChatDrawer from '../components/AiChatDrawer.jsx'
+import Logo from '../components/Logo.jsx'
 
 const { Title, Paragraph, Text } = Typography
 
@@ -35,6 +36,7 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    document.title = 'Pet Spa AI - Dịch Vụ Spa Thú Cưng Đẳng Cấp & Đặt Lịch Thông Minh'
     Promise.all([
       api('/spa').catch(() => null),
       api('/packages').catch(() => []),
@@ -64,11 +66,7 @@ export default function LandingPage() {
       <header className="landing-header">
         <div className="landing-container header-inner">
           <div className="landing-brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <div className="brand-mark">🐾</div>
-            <div className="brand-text">
-              <span className="brand-title">Pet Spa AI</span>
-              <span className="brand-subtitle">Smart Veterinary Grooming</span>
-            </div>
+            <Logo size={40} theme="light" subtitle="Smart Veterinary Grooming" />
           </div>
 
           <nav className="landing-nav-links">
@@ -477,11 +475,8 @@ export default function LandingPage() {
         <div className="landing-container">
           <Row gutter={[24, 24]} justify="space-between" align="middle">
             <Col xs={24} md={12}>
-              <div className="landing-brand" style={{ marginBottom: 8 }}>
-                <div className="brand-mark">🐾</div>
-                <div className="brand-text">
-                  <span className="brand-title" style={{ color: '#fff' }}>Pet Spa AI</span>
-                </div>
+              <div className="landing-brand" style={{ marginBottom: 12 }}>
+                <Logo size={36} theme="dark" />
               </div>
               <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, display: 'block' }}>
                 Đồ án môn Phân tích Thiết kế Hệ thống Thông tin Nâng cao — TS. Cao Thị Nhạn

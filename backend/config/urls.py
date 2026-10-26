@@ -36,6 +36,7 @@ api_patterns = [
     path('auth/', include('accounts.urls')),
     path('spa', SpaView.as_view()),
     path('dashboard/today', scheduling.DashboardView.as_view()),
+    path('dashboard/daily', scheduling.DashboardView.as_view()),
     path('analytics/overview', AnalyticsOverviewView.as_view()),
     path('clients/me', customers.MyClientView.as_view()),  # trước router để không bị nhầm pk
     path('ai/suggest-packages', ai.AiPackageSuggestionView.as_view()),

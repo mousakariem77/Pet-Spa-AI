@@ -6,7 +6,7 @@ from .models import HealthTag, Package, PackageItem, Service, SizeBand, Specialt
 class SpecialtySerializer(serializers.ModelSerializer):
     class Meta:
         model = Specialty
-        fields = ['id', 'code', 'name_vi']
+        fields = ['id', 'code', 'name_vi', 'species_scope', 'description']
 
 
 class HealthTagSerializer(serializers.ModelSerializer):

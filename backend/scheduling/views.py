@@ -256,11 +256,12 @@ class BookingViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
 
 
 class DashboardView(APIView):
-    """dashboard/today — tổng quan ngày cho Lễ tân/Quản lý (SPA-20). Doanh thu chỉ cộng hóa đơn đã thu."""
+    """dashboard/today & dashboard/daily — tổng quan ngày cho Lễ tân/Quản lý (SPA-20). Doanh thu chỉ cộng hóa đơn đã thu."""
 
     permission_classes = [IsFrontDesk]
 
     def get(self, request):
+        from spa.models import StaffProfile, Resource
         day = parse_date(request.query_params.get('date', '')) or timezone.localdate()
         lo, hi = _day_start(day), _day_start(day + timedelta(days=1))
         today = Booking.objects.filter(start_at__gte=lo, start_at__lt=hi)
@@ -276,11 +277,84 @@ class DashboardView(APIView):
         for b in today.filter(status__in=active_or_done).select_related('staff__user'):
             key = str(b.staff) if b.staff_id else 'Chưa giao'
             by_staff[key] = by_staff.get(key, 0) + 1
+
+        feed_qs = today.select_related(
+            'client', 'pet', 'package', 'staff__user', 'invoice'
+        ).prefetch_related(
+            'items__service', 'items__resource', 'pet__health_tags'
+        ).order_by('start_at')
+        feed = BookingSerializer(feed_qs, many=True, context={'request': request}).data
+
+        attention_list = []
+        for b in attention.select_related('pet', 'client')[:20]:
+            is_overdue = b.start_at < now
+            is_expired = b.created_at < (now - timedelta(hours=24))
+            reason = "Quá giờ hẹn" if is_overdue else "Chờ duyệt >24h"
+            if is_overdue and is_expired:
+                reason = "Quá giờ hẹn & Chờ duyệt >24h"
+            attention_list.append({
+                'id': b.pk,
+                'pet': b.pet.name,
+                'pet_id': b.pet_id,
+                'client_name': b.client.full_name,
+                'client_phone': b.client.phone,
+                'start_at': b.start_at,
+                'created_at': b.created_at,
+                'reason': reason,
+                'is_overdue': is_overdue,
+                'is_expired': is_expired,
+            })
+
+        day_weekday = day.weekday()
+        staff_profiles = StaffProfile.objects.filter(is_active=True).select_related('user').prefetch_related(
+            'shifts', 'specialties', 'time_off'
+        )
+        staff_on_duty = []
+        for sp in staff_profiles:
+            shifts_today = [s for s in sp.shifts.all() if s.weekday == day_weekday]
+            on_leave = any(t.date_from <= day <= t.date_to for t in sp.time_off.all())
+            assigned_today = today.filter(staff=sp).count()
+            in_progress_today = today.filter(staff=sp, status__in=('checked_in', 'in_progress')).count()
+            completed_today = today.filter(staff=sp, status=BookingStatus.COMPLETED).count()
+            shift_time_str = ', '.join(f"{s.start_time.strftime('%H:%M')}–{s.end_time.strftime('%H:%M')}" for s in shifts_today) if shifts_today else 'Không có ca'
+
+            staff_on_duty.append({
+                'id': sp.pk,
+                'user_id': sp.user_id,
+                'name': sp.user.full_name or sp.user.username,
+                'username': sp.user.username,
+                'role': sp.user.role,
+                'specialties': [spec.name_vi for spec in sp.specialties.all()],
+                'shifts': shift_time_str,
+                'has_shift': bool(shifts_today),
+                'on_leave': on_leave,
+                'assigned_count': assigned_today,
+                'in_progress_count': in_progress_today,
+                'completed_count': completed_today,
+            })
+
+        resources = Resource.objects.filter(is_active=True)
+        res_summary = {
+            'total': resources.count(),
+            'by_type': {},
+        }
+        for r in resources:
+            res_summary['by_type'][r.resource_type] = res_summary['by_type'].get(r.resource_type, 0) + 1
+
+        in_service_count = counts.get('checked_in', 0) + counts.get('in_progress', 0)
+
         return Response({
-            'date': day, 'counts': counts, 'total_bookings': sum(counts.values()),
-            'revenue': revenue, 'paid_invoices': paid.count(),
-            'unpaid_count': unpaid.count(), 'unpaid_total': sum(i.total for i in unpaid),
-            'needs_attention': [{'id': b.pk, 'pet': b.pet.name, 'start_at': b.start_at, 'created_at': b.created_at}
-                                for b in attention.select_related('pet')[:20]],
+            'date': day,
+            'counts': counts,
+            'total_bookings': sum(counts.values()),
+            'revenue': revenue,
+            'paid_invoices': paid.count(),
+            'unpaid_count': unpaid.count(),
+            'unpaid_total': sum(i.total for i in unpaid),
+            'needs_attention': attention_list,
             'by_staff': [{'staff': k, 'count': v} for k, v in by_staff.items()],
+            'feed': feed,
+            'staff_on_duty': staff_on_duty,
+            'resources_summary': res_summary,
+            'in_service_count': in_service_count,
         })

@@ -20,6 +20,8 @@ class Client(models.Model):
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='client')
     full_name = models.CharField('Họ tên', max_length=150)
     phone = models.CharField('Số điện thoại', max_length=20)
+    secondary_phone = models.CharField('Số điện thoại phụ / Zalo', max_length=20, blank=True)
+    birthday = models.DateField('Ngày sinh', null=True, blank=True)
     email = models.EmailField('Email', blank=True)
     address = models.CharField('Địa chỉ', max_length=300, blank=True)
     note = models.TextField('Ghi chú nội bộ', blank=True)

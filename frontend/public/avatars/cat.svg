@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <!-- Nền tròn màu Teal đồng bộ Pet Spa AI -->
+  <circle cx="50" cy="50" r="50" fill="#0f8b8d"/>
+  
+  <g fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Đôi tai nhọn đặc trưng loài mèo và viền khuôn mặt -->
+    <path d="M 31 46 L 27 26 L 43 33 C 47 31 53 31 57 33 L 73 26 L 69 46 C 75 55 73 69 64 74 C 56 78 44 78 36 74 C 27 69 25 55 31 46 Z"/>
+    
+    <!-- Nét lòng tai trong -->
+    <path d="M 33 38 L 31 29 L 41 33" stroke-width="2.5" opacity="0.6"/>
+    <path d="M 67 38 L 69 29 L 59 33" stroke-width="2.5" opacity="0.6"/>
+    
+    <!-- Mũi mèo tam giác nhỏ -->
+    <path d="M 47 57 L 53 57 L 50 61 Z" fill="#ffffff" stroke="none"/>
+    
+    <!-- Miệng mèo chữ W -->
+    <path d="M 50 61 L 50 64"/>
+    <path d="M 44 64 C 45 68 49 68 50 64 C 51 68 55 68 56 64"/>
+    
+    <!-- Râu mèo 2 bên má thanh thoát -->
+    <path d="M 20 57 L 33 59"/>
+    <path d="M 21 65 L 33 64"/>
+    <path d="M 80 57 L 67 59"/>
+    <path d="M 79 65 L 67 64"/>
+  </g>
+  
+  <!-- Đôi mắt mèo to tròn tinh anh -->
+  <circle cx="41" cy="48" r="3.5" fill="#ffffff"/>
+  <circle cx="59" cy="48" r="3.5" fill="#ffffff"/>
+  <circle cx="41.8" cy="47.2" r="1.3" fill="#0f8b8d"/>
+  <circle cx="59.8" cy="47.2" r="1.3" fill="#0f8b8d"/>
+</svg>

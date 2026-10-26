@@ -47,13 +47,13 @@ export function AuthProvider({ children }) {
         const data = await api('/auth/login', { method: 'POST', body: { username, password } })
         setToken(data.token)
         setUser(data.user)
-        return data.user
+        return data
       },
       async register(body) {
         const data = await api('/auth/register', { method: 'POST', body })
         setToken(data.token)
         setUser(data.user)
-        return data.user
+        return data
       },
       async logout() {
         try {

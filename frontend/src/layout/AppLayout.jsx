@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import {
-  Avatar, Badge, Button, Dropdown, Layout, List, Menu, Popover,
-  Space, Tag, Typography, message,
+  App, Avatar, Badge, Button, Dropdown, Layout, List, Menu, Popover,
+  Space, Tag, Typography,
 } from 'antd'
 import {
   BankOutlined, BarChartOutlined, BellOutlined, CalendarOutlined, CheckOutlined, DashboardOutlined,
-  DollarOutlined, GlobalOutlined, HistoryOutlined, IdcardOutlined,
+  DollarOutlined, ExclamationCircleOutlined, GlobalOutlined, HistoryOutlined, IdcardOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, RobotOutlined, ShopOutlined, TeamOutlined,
   ToolOutlined, UserOutlined,
 } from '@ant-design/icons'
@@ -15,6 +15,8 @@ import { api, unwrap } from '../api.js'
 import { useAuth, ROLE_LABEL } from '../auth.jsx'
 import { APP_ROUTES, labelFor } from '../routes.jsx'
 import AiChatDrawer from '../components/AiChatDrawer.jsx'
+import Logo from '../components/Logo.jsx'
+import { getNotifMeta } from '../pages/Notifications.jsx'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -59,9 +61,42 @@ const NAV_GROUPS = [
 ]
 
 export default function AppLayout() {
+  const { modal, message } = App.useApp()
   const { user, logout } = useAuth()
   const nav = useNavigate()
   const { pathname } = useLocation()
+
+  // Đồng bộ tiêu đề tab trình duyệt tương ứng theo từng trang chức năng
+  useEffect(() => {
+    const currentRoute = APP_ROUTES.find((r) => r.path === pathname)
+    if (currentRoute) {
+      const pageTitle = labelFor(currentRoute, user)
+      document.title = `${pageTitle} | Pet Spa AI`
+    } else {
+      document.title = 'Pet Spa AI - Hệ Thống Chăm Sóc & Đặt Lịch Spa Thú Cưng Thông Minh'
+    }
+  }, [pathname, user])
+
+  const handleLogout = () => {
+    modal.confirm({
+      title: 'Xác nhận đăng xuất',
+      icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+      content: 'Bạn có chắc chắn muốn đăng xuất khỏi hệ thống không?',
+      okText: 'Đăng xuất',
+      okType: 'danger',
+      cancelText: 'Hủy',
+      centered: true,
+      onOk: async () => {
+        try {
+          await logout()
+          message.success('Đã đăng xuất thành công.')
+          nav('/')
+        } catch {
+          nav('/')
+        }
+      },
+    })
+  }
 
   // Trạng thái thu gọn sidebar (lưu vào localStorage)
   const [collapsed, setCollapsed] = useState(() => {
@@ -85,17 +120,17 @@ export default function AppLayout() {
   // Thông báo
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifications, setNotifications] = useState([])
-  const [notifLoading, setNotifLoading] = useState(false)
+  const [notifOpen, setNotifOpen] = useState(false)
 
   const loadNotifications = async () => {
     if (!user) return
     try {
-      const [cnt, list] = await Promise.all([
+      const [cnt, listRes] = await Promise.all([
         api('/notifications/unread-count').catch(() => ({ count: 0 })),
-        api('/notifications?unread=1').catch(() => []),
+        api('/notifications', { params: { page_size: 8 } }).catch(() => ({ results: [] })),
       ])
-      setUnreadCount(cnt.count || 0)
-      setNotifications(unwrap(list))
+      setUnreadCount(cnt?.count ?? 0)
+      setNotifications(unwrap(listRes))
     } catch {
       // ignore
     }
@@ -111,28 +146,45 @@ export default function AppLayout() {
     try {
       await api('/notifications/read-all', { method: 'POST' })
       setUnreadCount(0)
-      setNotifications([])
+      // Giữ nguyên thông báo trong hòm thư, chỉ cập nhật trạng thái đã đọc
+      setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true })))
       message.success('Đã đánh dấu đã đọc tất cả')
     } catch {
       // ignore
     }
   }
 
-  const markRead = async (id, refType, refId) => {
-    try {
-      await api(`/notifications/${id}/read`, { method: 'POST' })
-      setNotifications((prev) => prev.filter((n) => n.id !== id))
+  const handleNotificationClick = async (n) => {
+    setNotifOpen(false)
+    if (!n.is_read) {
+      api(`/notifications/${n.id}/read`, { method: 'POST' }).catch(() => {})
+      setNotifications((prev) => prev.map((item) => item.id === n.id ? { ...item, is_read: true } : item))
       setUnreadCount((c) => Math.max(0, c - 1))
-      if (refType === 'booking') {
-        nav('/app/lich-hen')
-      }
-    } catch {
-      // ignore
+    }
+
+    if (n.link) {
+      nav(n.link)
+    } else if (n.ref_type === 'booking') {
+      nav(n.ref_id ? `/app/lich-hen?id=${n.ref_id}` : '/app/lich-hen')
+    } else if (n.ref_type === 'invoice') {
+      nav(n.ref_id ? `/app/hoa-don?id=${n.ref_id}` : '/app/hoa-don')
+    } else if (n.ref_type === 'reminder') {
+      nav('/app/nhac-tai-spa')
+    } else if (n.ref_type === 'client' || n.ref_type === 'customer') {
+      nav('/app/khach-hang')
+    } else if (n.ref_type === 'pet') {
+      nav('/app/thu-cung')
+    } else if (n.ref_type === 'staff') {
+      nav('/app/nhan-su')
+    } else if (n.ref_type === 'analytics') {
+      nav('/app/thong-ke')
     }
   }
 
   // Lọc routes theo vai trò và tổ chức thành nhóm
-  const visibleRoutes = APP_ROUTES.filter((r) => (r.roles ? user && r.roles.includes(user.role) : true))
+  const visibleRoutes = APP_ROUTES.filter(
+    (r) => (r.roles ? user && r.roles.includes(user.role) : true) && !(r.hideInMenuFor && user && r.hideInMenuFor.includes(user.role)),
+  )
   const routeMap = new Map(visibleRoutes.map((r) => [r.path, r]))
 
   const menuItems = collapsed
@@ -163,37 +215,108 @@ export default function AppLayout() {
       }).filter(Boolean)
 
   const notifPopoverContent = (
-    <div style={{ width: 340 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <Text strong>Thông báo mới</Text>
+    <div style={{ width: 370, maxWidth: '92vw' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid #f1f5f9' }}>
+        <Space size={8}>
+          <Text strong style={{ fontSize: 15, color: '#0b3d3f' }}>Hộp thư thông báo</Text>
+          {unreadCount > 0 ? (
+            <Badge count={unreadCount} style={{ backgroundColor: '#0f8b8d' }} />
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>({notifications.length})</Text>
+          )}
+        </Space>
         {unreadCount > 0 && (
-          <Button type="link" size="small" icon={<CheckOutlined />} onClick={markAllRead}>
-            Đã đọc tất cả
+          <Button type="link" size="small" icon={<CheckOutlined />} onClick={markAllRead} style={{ color: '#0f8b8d', padding: 0 }}>
+            Đọc tất cả
           </Button>
         )}
       </div>
 
-      <List
-        size="small"
-        dataSource={notifications}
-        locale={{ emptyText: 'Không có thông báo mới' }}
-        renderItem={(n) => (
-          <List.Item
-            style={{ cursor: 'pointer', padding: '8px 4px' }}
-            onClick={() => markRead(n.id, n.ref_type, n.ref_id)}
-          >
-            <List.Item.Meta
-              title={<Text strong style={{ fontSize: 13 }}>{n.title}</Text>}
-              description={
-                <div>
-                  <div style={{ fontSize: 12, color: '#4b5563' }}>{n.body}</div>
-                  <Text type="secondary" style={{ fontSize: 11 }}>{dayjs(n.created_at).fromNow ? dayjs(n.created_at).fromNow() : dayjs(n.created_at).format('HH:mm DD/MM')}</Text>
-                </div>
-              }
-            />
-          </List.Item>
-        )}
-      />
+      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+        <List
+          size="small"
+          dataSource={notifications}
+          locale={{ emptyText: 'Chưa có thông báo nào trong hộp thư' }}
+          renderItem={(n) => {
+            const meta = getNotifMeta(n.kind, n.ref_type)
+            return (
+              <List.Item
+                key={n.id}
+                style={{
+                  cursor: 'pointer',
+                  padding: '10px 10px',
+                  borderRadius: 8,
+                  background: n.is_read ? '#ffffff' : '#f0fdfa',
+                  border: n.is_read ? '1px solid #f1f5f9' : '1px solid #ccfbf1',
+                  borderLeft: n.is_read ? '3px solid #cbd5e1' : '3px solid #0f8b8d',
+                  marginBottom: 6,
+                  transition: 'background 0.2s',
+                }}
+                onClick={() => handleNotificationClick(n)}
+              >
+                <List.Item.Meta
+                  avatar={
+                    <div
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: '50%',
+                        background: meta.bg,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 16,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {meta.icon}
+                    </div>
+                  }
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                      <Text strong={!n.is_read} style={{ fontSize: 13, color: n.is_read ? '#475569' : '#0b3d3f' }}>
+                        {n.title}
+                      </Text>
+                      {!n.is_read && (
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#0f8b8d', flexShrink: 0 }} />
+                      )}
+                    </div>
+                  }
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, color: n.is_read ? '#64748b' : '#334155', lineHeight: 1.4, margin: '2px 0 4px' }}>
+                        {n.body}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Tag color={meta.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', margin: 0, borderRadius: 3 }}>
+                          {meta.label}
+                        </Tag>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {dayjs(n.created_at).format('HH:mm DD/MM')}
+                        </Text>
+                      </div>
+                    </div>
+                  }
+                />
+              </List.Item>
+            )
+          }}
+        />
+      </div>
+
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
+        <Button
+          type="link"
+          block
+          onClick={() => {
+            setNotifOpen(false)
+            nav('/app/thong-bao')
+          }}
+          style={{ color: '#0f8b8d', fontWeight: 600 }}
+        >
+          Xem toàn bộ hòm thư thông báo →
+        </Button>
+      </div>
     </div>
   )
 
@@ -222,25 +345,20 @@ export default function AppLayout() {
           className="brand"
           onClick={() => nav('/app/tong-quan')}
           style={{
+            height: 64,
             flexShrink: 0,
             background: '#0b3d3f',
             borderBottom: '1px solid rgba(255,255,255,0.08)',
-            padding: collapsed ? '16px 0' : '16px 18px',
+            padding: collapsed ? '14px 0' : '14px 16px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            gap: 10,
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
           title="Pet Spa AI - Về trang Tổng quan"
         >
-          <div className="brand-mark" style={{ minWidth: 34 }}>🐾</div>
-          {!collapsed && (
-            <span style={{ fontSize: 17, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-              Pet Spa AI
-            </span>
-          )}
+          <Logo size={36} showText={!collapsed} theme="dark" />
         </div>
 
         {/* Scrollable menu area (không hiển thị scrollbar, cuộn mượt mà) */}
@@ -306,7 +424,16 @@ export default function AppLayout() {
           <Space size="large">
             {/* Chuông thông báo */}
             {user && (
-              <Popover content={notifPopoverContent} trigger="click" placement="bottomRight">
+              <Popover
+                content={notifPopoverContent}
+                trigger="click"
+                placement="bottomRight"
+                open={notifOpen}
+                onOpenChange={(open) => {
+                  setNotifOpen(open)
+                  if (open) loadNotifications()
+                }}
+              >
                 <Badge count={unreadCount} overflowCount={99} offset={[-2, 4]}>
                   <Button type="text" shape="circle" icon={<BellOutlined style={{ fontSize: 18, color: '#4b5563' }} />} />
                 </Badge>
@@ -327,10 +454,8 @@ export default function AppLayout() {
                       key: 'out',
                       label: 'Đăng xuất',
                       icon: <LogoutOutlined />,
-                      onClick: async () => {
-                        await logout()
-                        nav('/')
-                      },
+                      danger: true,
+                      onClick: handleLogout,
                     },
                   ],
                 }}

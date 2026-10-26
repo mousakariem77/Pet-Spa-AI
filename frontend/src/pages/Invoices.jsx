@@ -13,6 +13,7 @@ import dayjs from 'dayjs'
 import { api, money, toFormErrors, unwrap } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import RowPerPageSelect from '../components/RowPerPageSelect.jsx'
+import PetAvatar from '../components/PetAvatar.jsx'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -292,11 +293,12 @@ export default function Invoices() {
       key: 'pet',
       render: (_, r) => (
         <a
-          style={{ cursor: 'pointer' }}
+          style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
           onClick={() => nav(`/app/thu-cung?q=${r.pet_name}`)}
           title="Xem hồ sơ thú cưng này"
         >
-          <Tag color="cyan">🐾 {r.pet_name || 'Chưa rõ'}</Tag>
+          <PetAvatar species={r.pet_species} size={22} style={{ border: 'none', boxShadow: 'none' }} />
+          <Tag color="cyan">{r.pet_name || 'Chưa rõ'}</Tag>
         </a>
       ),
     },
@@ -506,9 +508,12 @@ export default function Invoices() {
                 </a> ({detailInvoice.client_phone || '—'})
               </Descriptions.Item>
               <Descriptions.Item label="Bé cưng">
-                <a onClick={() => nav(`/app/thu-cung?q=${detailInvoice.pet_name}`)} style={{ fontWeight: 600 }}>
-                  🐾 {detailInvoice.pet_name}
-                </a>
+                <Space align="center" size={8}>
+                  <PetAvatar species={detailInvoice.pet_species} size={28} />
+                  <a onClick={() => nav(`/app/thu-cung?q=${detailInvoice.pet_name}`)} style={{ fontWeight: 600 }}>
+                    {detailInvoice.pet_name}
+                  </a>
+                </Space>
               </Descriptions.Item>
               {detailInvoice.booking && (
                 <Descriptions.Item label="Lịch hẹn tương ứng">

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   App, Button, Card, Col, Form, Input, Row, Space, Switch, Tag, Typography,
 } from 'antd'
@@ -11,18 +11,43 @@ const { Title, Text } = Typography
 export default function Account() {
   const { message } = App.useApp()
   const { user, refresh } = useAuth()
+  const [infoForm] = Form.useForm()
   const [pwForm] = Form.useForm()
   const [busy, setBusy] = useState(false)
   const [pwBusy, setPwBusy] = useState(false)
 
+  // Đồng bộ dữ liệu người dùng vào form khi user được tải hoặc cập nhật
+  useEffect(() => {
+    if (user) {
+      infoForm.setFieldsValue({
+        full_name: user.full_name || '',
+        phone: user.phone || '',
+        email: user.email || '',
+        allow_reminders: user.allow_reminders ?? true,
+      })
+    }
+  }, [user, infoForm])
+
   const saveInfo = async (v) => {
     setBusy(true)
     try {
-      await api('/auth/me', { method: 'PATCH', body: v })
+      const payload = {
+        full_name: v.full_name?.trim(),
+        phone: v.phone?.trim(),
+        email: v.email?.trim() || '',
+      }
+      if (user?.role === 'customer') {
+        payload.allow_reminders = !!v.allow_reminders
+      }
+
+      await api('/auth/me', { method: 'PATCH', body: payload })
       await refresh()
       message.success('Đã cập nhật thông tin cá nhân.')
     } catch (e) {
-      message.error(e.message)
+      if (e.fields && Object.keys(e.fields).length > 0) {
+        infoForm.setFields(toFormErrors(e))
+      }
+      message.error(e.message || 'Có lỗi xảy ra.')
     } finally {
       setBusy(false)
     }
@@ -32,11 +57,17 @@ export default function Account() {
     setPwBusy(true)
     try {
       const data = await api('/auth/change-password', { method: 'POST', body: v })
-      setToken(data.token) // token cũ bị hủy khi đổi mật khẩu
+      if (data?.token) {
+        setToken(data.token) // Cập nhật token mới khi token cũ bị hủy
+      }
+      await refresh()
       pwForm.resetFields()
       message.success('Đã đổi mật khẩu thành công.')
     } catch (e) {
-      pwForm.setFields(toFormErrors(e))
+      if (e.fields && Object.keys(e.fields).length > 0) {
+        pwForm.setFields(toFormErrors(e))
+      }
+      message.error(e.message || 'Có lỗi xảy ra.')
     } finally {
       setPwBusy(false)
     }
@@ -65,14 +96,9 @@ export default function Account() {
             style={{ width: '100%', borderRadius: 12, height: '100%' }}
           >
             <Form
+              form={infoForm}
               layout="vertical"
               onFinish={saveInfo}
-              initialValues={{
-                full_name: user?.full_name,
-                phone: user?.phone,
-                email: user?.email,
-                allow_reminders: user?.allow_reminders,
-              }}
             >
               <Form.Item name="full_name" label="Họ và tên" rules={[{ required: true, message: 'Nhập họ và tên' }]}>
                 <Input placeholder="ví dụ: Nguyễn Văn A" />

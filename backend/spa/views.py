@@ -18,7 +18,19 @@ class SpaView(APIView):
     def _spa(self):
         spa = Spa.get()
         if not spa:
-            raise NotFound('Chưa khai báo hồ sơ spa.')
+            from datetime import time
+            spa = Spa.objects.create(
+                id=1,
+                name='Spa Thú Y Lông Mượt',
+                phone='0283000000',
+                email='lienhe@longmuot.example',
+                address='25 Lê Văn Thịnh, TP. Thủ Đức, TP.HCM',
+                open_time=time(8, 0),
+                close_time=time(19, 0),
+                open_weekdays=[0, 1, 2, 3, 4, 5, 6],
+                slot_minutes=30,
+                cancel_cutoff_hours=2,
+            )
         return spa
 
     def get(self, request):

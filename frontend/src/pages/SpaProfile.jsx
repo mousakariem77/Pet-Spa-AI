@@ -18,31 +18,56 @@ export default function SpaProfile() {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    api('/spa').then((s) => {
-      form.setFieldsValue({
-        ...s,
-        open_time: dayjs(s.open_time, T),
-        close_time: dayjs(s.close_time, T),
+    api('/spa')
+      .then((s) => {
+        if (s) {
+          form.setFieldsValue({
+            ...s,
+            open_time: s.open_time ? dayjs(s.open_time, T) : undefined,
+            close_time: s.close_time ? dayjs(s.close_time, T) : undefined,
+            open_weekdays: Array.isArray(s.open_weekdays) ? s.open_weekdays : [0, 1, 2, 3, 4, 5, 6],
+          })
+        }
       })
-    }).finally(() => setLoading(false))
-  }, [form])
+      .catch((e) => {
+        message.error(e.message || 'Không thể tải thông tin hồ sơ spa.')
+      })
+      .finally(() => setLoading(false))
+  }, [form, message])
 
   const save = async (v) => {
     setBusy(true)
     try {
-      await api('/spa', {
+      const body = {
+        name: v.name?.trim(),
+        phone: v.phone?.trim() || '',
+        email: v.email?.trim() || '',
+        address: v.address?.trim() || '',
+        open_time: v.open_time ? dayjs(v.open_time).format(T) : undefined,
+        close_time: v.close_time ? dayjs(v.close_time).format(T) : undefined,
+        open_weekdays: v.open_weekdays,
+        slot_minutes: v.slot_minutes,
+        cancel_cutoff_hours: v.cancel_cutoff_hours,
+      }
+
+      const res = await api('/spa', {
         method: 'PATCH',
-        body: {
-          name: v.name, phone: v.phone, email: v.email, address: v.address,
-          open_time: v.open_time.format(T), close_time: v.close_time.format(T),
-          open_weekdays: v.open_weekdays, slot_minutes: v.slot_minutes,
-          cancel_cutoff_hours: v.cancel_cutoff_hours,
-        },
+        body,
       })
+      if (res) {
+        form.setFieldsValue({
+          ...res,
+          open_time: res.open_time ? dayjs(res.open_time, T) : undefined,
+          close_time: res.close_time ? dayjs(res.close_time, T) : undefined,
+          open_weekdays: Array.isArray(res.open_weekdays) ? res.open_weekdays : [],
+        })
+      }
       message.success('Đã lưu hồ sơ spa.')
     } catch (e) {
-      form.setFields(toFormErrors(e))
-      message.error(e.message)
+      if (e.fields && Object.keys(e.fields).length > 0) {
+        form.setFields(toFormErrors(e))
+      }
+      message.error(e.message || 'Có lỗi xảy ra khi lưu hồ sơ.')
     } finally {
       setBusy(false)
     }
@@ -97,23 +122,53 @@ export default function SpaProfile() {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={6}>
-              <Form.Item name="close_time" label="Giờ đóng cửa" rules={[{ required: true, message: 'Chọn giờ đóng cửa' }]}>
+              <Form.Item
+                name="close_time"
+                label="Giờ đóng cửa"
+                rules={[
+                  { required: true, message: 'Chọn giờ đóng cửa' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      const openTime = getFieldValue('open_time')
+                      if (!value || !openTime) {
+                        return Promise.resolve()
+                      }
+                      if (value.isAfter(openTime)) {
+                        return Promise.resolve()
+                      }
+                      return Promise.reject(new Error('Giờ đóng cửa phải sau giờ mở cửa'))
+                    },
+                  }),
+                ]}
+              >
                 <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={6}>
-              <Form.Item name="slot_minutes" label="Bước slot đặt lịch (phút)">
+              <Form.Item
+                name="slot_minutes"
+                label="Bước slot đặt lịch (phút)"
+                rules={[{ required: true, message: 'Nhập bước slot' }]}
+              >
                 <InputNumber min={5} max={120} step={5} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={6}>
-              <Form.Item name="cancel_cutoff_hours" label="Hủy trước giờ hẹn (giờ)">
+              <Form.Item
+                name="cancel_cutoff_hours"
+                label="Hủy trước giờ hẹn (giờ)"
+                rules={[{ required: true, message: 'Nhập số giờ hủy trước' }]}
+              >
                 <InputNumber min={0} max={72} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item name="open_weekdays" label="Các ngày mở cửa trong tuần">
+          <Form.Item
+            name="open_weekdays"
+            label="Các ngày mở cửa trong tuần"
+            rules={[{ required: true, message: 'Vui lòng chọn ít nhất 1 ngày mở cửa' }]}
+          >
             <Checkbox.Group options={DAYS.map((label, value) => ({ label, value }))} />
           </Form.Item>
 
