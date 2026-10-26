@@ -8,7 +8,7 @@ import {
 import {
   CalendarFilled, CalendarOutlined, CheckCircleFilled, CheckCircleOutlined,
   ClockCircleFilled, ClockCircleOutlined, CloseCircleFilled, CopyOutlined,
-  DollarCircleFilled, DollarOutlined, ExclamationCircleFilled, EyeOutlined,
+  DesktopOutlined, DollarCircleFilled, DollarOutlined, ExclamationCircleFilled, EyeOutlined,
   FilterOutlined, FireOutlined, HeartFilled, IdcardOutlined, InfoCircleOutlined,
   LeftOutlined, MedicineBoxOutlined, PhoneOutlined, PlayCircleOutlined,
   PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined,
@@ -526,6 +526,14 @@ export default function Home() {
                   Làm mới
                 </Button>
 
+                <Button
+                  type="primary"
+                  style={{ background: '#0f8b8d', borderColor: '#0f8b8d', color: '#fff', fontWeight: 600 }}
+                  icon={<DesktopOutlined />}
+                  onClick={() => nav('/app/bang-le-tan')}
+                >
+                  Bảng Lễ Tân
+                </Button>
                 <Button
                   type="primary"
                   style={{ background: '#faad14', borderColor: '#faad14', color: '#1a1a1a', fontWeight: 600 }}

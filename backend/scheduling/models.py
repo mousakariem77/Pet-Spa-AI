@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
+from django.utils import timezone
 
 
 class BookingStatus(models.TextChoices):
@@ -103,3 +104,41 @@ class BookingStatusLog(models.Model):
 
     class Meta:
         ordering = ['changed_at', 'id']
+
+
+class WalkInStatus(models.TextChoices):
+    WAITING = 'waiting', 'Đang chờ'
+    CALLED = 'called', 'Đang gọi vào'
+    SERVED = 'served', 'Đã tiếp nhận'
+    LEFT = 'left', 'Đã rời đi / Hủy'
+
+
+class WalkInTicket(models.Model):
+    """Phiếu hàng đợi khách vãng lai tại quầy (SPA-18)."""
+    date = models.DateField(default=timezone.localdate, db_index=True)
+    queue_no = models.PositiveIntegerField('Số thứ tự', db_index=True)
+    client = models.ForeignKey('customers.Client', null=True, blank=True, on_delete=models.SET_NULL, related_name='walk_in_tickets')
+    contact_name = models.CharField('Tên khách', max_length=120)
+    phone = models.CharField('Số điện thoại', max_length=20, blank=True)
+    pet = models.ForeignKey('customers.Pet', null=True, blank=True, on_delete=models.SET_NULL, related_name='walk_in_tickets')
+    pet_name = models.CharField('Tên thú cưng', max_length=120)
+    pet_species = models.CharField('Loài', max_length=20, choices=[('dog', 'Chó'), ('cat', 'Mèo')], default='dog')
+    service = models.ForeignKey('catalog.Service', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    package = models.ForeignKey('catalog.Package', null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    status = models.CharField(max_length=20, choices=WalkInStatus.choices, default=WalkInStatus.WAITING, db_index=True)
+    estimated_wait_minutes = models.PositiveIntegerField('Thời gian chờ ước tính (phút)', default=15)
+    booking = models.ForeignKey('scheduling.Booking', null=True, blank=True, on_delete=models.SET_NULL, related_name='walk_in_tickets')
+    note = models.TextField('Ghi chú tiếp nhận', blank=True)
+    called_at = models.DateTimeField(null=True, blank=True)
+    served_at = models.DateTimeField(null=True, blank=True)
+    left_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['date', 'queue_no']
+        unique_together = [('date', 'queue_no')]
+
+    def __str__(self):
+        return f'#{self.queue_no:02d} - {self.pet_name} ({self.get_status_display()})'
+

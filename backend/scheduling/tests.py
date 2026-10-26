@@ -10,8 +10,10 @@ from billing.models import Invoice
 from catalog.models import Package, Service
 from customers.models import Pet
 from notifications.models import Notification
-from scheduling.models import Booking
+from scheduling.models import Booking, BookingItem
 from spa.models import StaffProfile
+
+from . import services
 
 API = '/api/v1'
 
@@ -113,7 +115,7 @@ class BookingFlowTests(BaseCase):
     def test_availability_lists_slots(self):
         r = self.as_user('khach1').get(f'{API}/bookings/availability', dict(
             pet=self.pet.pk, services=str(self.svc['bath_basic']), date=(date.today() + timedelta(days=10)).isoformat()))
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 200, r.data)
         self.assertTrue(any(s['available'] for s in r.data))
 
     def test_full_lifecycle_to_payment(self):
@@ -163,11 +165,47 @@ class BookingFlowTests(BaseCase):
         self.assertEqual(r.status_code, 409)
         self.assertEqual(r.data['code'], 'cancel_too_late')
 
+    def test_update_booking_reschedule_success(self):
+        b = self._book('khach1', days=5, hour=9).data['id']
+        # Dời sang 14h cùng ngày
+        new_time = at(5, 14)
+        r = self.as_user('khach1').patch(f'{API}/bookings/{b}', {'start_at': new_time}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['id'], b)
+        b_obj = Booking.objects.get(pk=b)
+        self.assertEqual(timezone.localtime(b_obj.start_at).hour, 14)
+
+    def test_update_booking_cannot_edit_completed(self):
+        b = Booking.objects.filter(status='completed').first()
+        r = self.as_user('letan').patch(f'{API}/bookings/{b.pk}', {'start_at': at(10, 10)}, format='json')
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.data['code'], 'invalid_transition')
+
+    def test_update_booking_permission_denied_for_other_customer(self):
+        from rest_framework.exceptions import PermissionDenied
+        other_user = User.objects.create_user('khach2', 'khach2@example.com', 'Demo@12345', role='customer')
+        b_id = self._book('khach1', days=6, hour=9).data['id']
+        b = Booking.objects.get(pk=b_id)
+        with self.assertRaises(PermissionDenied):
+            services.update_booking(b, other_user, start_at=timezone.now() + timedelta(days=6))
+
     def test_cancelled_frees_slot(self):
         b = self._book('letan', services=('cat_spa',), pet=Pet.objects.get(name='Mimi')).data['id']
         self.as_user('letan').post(f'{API}/bookings/{b}/cancel', dict(reason='Khách đổi ý'), format='json')
         r = self._book('letan', services=('cat_spa',), pet=Pet.objects.get(name='Sữa'))
         self.assertEqual(r.status_code, 201, r.data)
+
+    def test_reject_pending_booking(self):
+        b = self._book('khach1', days=7, hour=9).data['id']
+        r = self.as_user('letan').post(f'{API}/bookings/{b}/reject', dict(reason='Hết chỗ đột xuất'), format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['status'], 'cancelled')
+        self.assertEqual(r.data['cancel_reason_code'], 'rejected')
+
+    def test_calendar_endpoint(self):
+        r = self.as_user('letan').get(f'{API}/bookings/calendar?from={date.today().isoformat()}&to={(date.today() + timedelta(days=30)).isoformat()}')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIsInstance(r.data, list)
 
 
 class RoleScopeTests(BaseCase):
@@ -217,7 +255,7 @@ class RoleScopeTests(BaseCase):
         self.assertEqual(self.as_user('ktv1').get(f'{API}/dashboard/today').status_code, 403)
         self.assertEqual(self.as_user('khach1').get(f'{API}/dashboard/daily').status_code, 403)
         r = self.as_user('letan').get(f'{API}/dashboard/today')
-        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(r.data['unpaid_count'], Invoice.objects.filter(status='unpaid').count())
         self.assertIn('feed', r.data)
         self.assertIn('staff_on_duty', r.data)
@@ -294,4 +332,197 @@ class AnalyticsTests(BaseCase):
             self.assertIn('insights', r.data)
             self.assertIn('ai_rebook', r.data)
             self.assertGreaterEqual(r.data['financial']['paid_invoices_count'], 0)
+
+
+class WalkInQueueTests(BaseCase):
+    """Kiểm thử tính năng hàng đợi khách vãng lai (SPA-18)."""
+
+    def setUp(self):
+        super().setUp()
+        from scheduling.models import WalkInTicket
+        WalkInTicket.objects.all().delete()
+
+    def test_create_walk_in_generates_sequential_queue_no(self):
+        # Tạo vé thứ nhất
+        r1 = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Anh Nam',
+            'phone': '0901234567',
+            'pet_name': 'Bé Đốm',
+            'pet_species': 'dog',
+            'service': 1,
+            'note': 'Khách quen vãng lai',
+        }, format='json')
+        self.assertEqual(r1.status_code, 201, r1.data)
+        self.assertEqual(r1.data['queue_no'], 1)
+        self.assertEqual(r1.data['queue_code'], '#01')
+        self.assertEqual(r1.data['status'], 'waiting')
+        self.assertGreaterEqual(r1.data['estimated_wait_minutes'], 5)
+
+        # Tạo vé thứ hai
+        r2 = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Chị Hoa',
+            'phone': '0988776655',
+            'pet_name': 'Bé Miu',
+            'pet_species': 'cat',
+            'service': 1,
+        }, format='json')
+        self.assertEqual(r2.status_code, 201)
+        self.assertEqual(r2.data['queue_no'], 2)
+        self.assertEqual(r2.data['queue_code'], '#02')
+
+    def test_call_and_convert_walk_in_flow(self):
+        letan = self.as_user('letan')
+        # Tạo phiếu
+        ticket_id = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Bác Ba',
+            'phone': '0912345678',
+            'pet_name': 'Bé Cún',
+            'pet_species': 'dog',
+            'service': 1,
+        }, format='json').data['id']
+
+        # Gọi số (waiting -> called)
+        r_call = letan.post(f'{API}/walk-ins/{ticket_id}/call')
+        self.assertEqual(r_call.status_code, 200)
+        self.assertEqual(r_call.data['status'], 'called')
+        self.assertIsNotNone(r_call.data['called_at'])
+
+        # Chuyển đổi thành Booking và Check-in (called -> served)
+        r_conv = letan.post(f'{API}/walk-ins/{ticket_id}/convert', {}, format='json')
+        self.assertEqual(r_conv.status_code, 200, r_conv.data)
+        self.assertEqual(r_conv.data['ticket']['status'], 'served')
+        self.assertIsNotNone(r_conv.data['booking'])
+        self.assertEqual(r_conv.data['booking']['channel'], 'walk_in')
+
+        # Thử convert lại lần 2 phải bị chặn (409)
+        self.assertEqual(letan.post(f'{API}/walk-ins/{ticket_id}/convert').status_code, 409)
+
+    def test_leave_walk_in(self):
+        letan = self.as_user('letan')
+        ticket_id = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Anh Hùng',
+            'phone': '0933333333',
+            'pet_name': 'Bé Rex',
+        }, format='json').data['id']
+
+        r = letan.post(f'{API}/walk-ins/{ticket_id}/leave', {'reason': 'Khách bận việc đột xuất'}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['status'], 'left')
+        self.assertIn('Khách bận', r.data['note'])
+
+    def test_kiosk_and_list_endpoints(self):
+        # Lấy kiosk công khai không cần auth
+        r_kiosk = self.client.get(f'{API}/walk-ins/kiosk')
+        self.assertEqual(r_kiosk.status_code, 200)
+        self.assertIn('called', r_kiosk.data)
+        self.assertIn('waiting', r_kiosk.data)
+
+        # Lấy danh sách hàng đợi kèm summary cho lễ tân
+        r_list = self.as_user('letan').get(f'{API}/walk-ins')
+        self.assertEqual(r_list.status_code, 200)
+        self.assertIn('summary', r_list.data)
+        self.assertIn('results', r_list.data)
+
+    def test_rbac_walk_in(self):
+        # Tạo phiếu
+        ticket_id = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Khách Test RBAC',
+            'pet_name': 'Bé RBAC',
+        }, format='json').data['id']
+
+        khach = self.as_user('khach1')
+        ktv = self.as_user('ktv1')
+        letan = self.as_user('letan')
+        quanly = self.as_user('quanly')
+
+        # 1. Khách hàng và Kỹ thuật viên không được xem danh sách đầy đủ
+        self.assertEqual(khach.get(f'{API}/walk-ins').status_code, 403)
+        self.assertEqual(ktv.get(f'{API}/walk-ins').status_code, 403)
+        self.assertEqual(letan.get(f'{API}/walk-ins').status_code, 200)
+        self.assertEqual(quanly.get(f'{API}/walk-ins').status_code, 200)
+
+        # 2. Khách hàng và KTV không được gọi số
+        self.assertEqual(khach.post(f'{API}/walk-ins/{ticket_id}/call').status_code, 403)
+        self.assertEqual(ktv.post(f'{API}/walk-ins/{ticket_id}/call').status_code, 403)
+
+        # 3. Khách hàng và KTV không được convert hoặc leave
+        self.assertEqual(khach.post(f'{API}/walk-ins/{ticket_id}/convert').status_code, 403)
+        self.assertEqual(ktv.post(f'{API}/walk-ins/{ticket_id}/convert').status_code, 403)
+        self.assertEqual(khach.post(f'{API}/walk-ins/{ticket_id}/leave').status_code, 403)
+        self.assertEqual(ktv.post(f'{API}/walk-ins/{ticket_id}/leave').status_code, 403)
+
+    def test_invalid_state_transitions(self):
+        letan = self.as_user('letan')
+        # Tạo phiếu 1 và chuyển sang served
+        t1 = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Khách 1', 'pet_name': 'Bé 1'
+        }, format='json').data['id']
+        letan.post(f'{API}/walk-ins/{t1}/call')
+        letan.post(f'{API}/walk-ins/{t1}/convert')
+
+        # Vé đã served không thể gọi hoặc hủy rời đi
+        self.assertEqual(letan.post(f'{API}/walk-ins/{t1}/call').status_code, 409)
+        self.assertEqual(letan.post(f'{API}/walk-ins/{t1}/leave').status_code, 409)
+
+        # Tạo phiếu 2 và hủy rời đi
+        t2 = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Khách 2', 'pet_name': 'Bé 2'
+        }, format='json').data['id']
+        letan.post(f'{API}/walk-ins/{t2}/leave')
+
+        # Vé đã left không thể gọi hoặc convert
+        self.assertEqual(letan.post(f'{API}/walk-ins/{t2}/call').status_code, 409)
+        self.assertEqual(letan.post(f'{API}/walk-ins/{t2}/convert').status_code, 409)
+
+    def test_convert_with_resource_assignment_spa17(self):
+        from spa.models import Resource, ResourceType
+        busy_ids = [
+            it.resource_id for it in BookingItem.objects.filter(
+                resource__isnull=False,
+                booking__status__in=['checked_in', 'in_progress']
+            )
+        ]
+        res = Resource.objects.filter(resource_type=ResourceType.BATH_TUB, is_active=True).exclude(pk__in=busy_ids).first()
+        if not res:
+            res = Resource.objects.create(name='Bồn tắm phụ 3', resource_type=ResourceType.BATH_TUB, is_active=True)
+
+        letan = self.as_user('letan')
+
+        # Tạo vé với dịch vụ 1 (Tắm cơ bản -> bath_tub)
+        ticket_id = self.client.post(f'{API}/walk-ins', {
+            'contact_name': 'Anh Minh',
+            'phone': '0944556677',
+            'pet_name': 'Bé Lu',
+            'pet_species': 'dog',
+            'service': 1,
+        }, format='json').data['id']
+
+        # Chuyển đổi và gán bàn thực địa (SPA-17)
+        r = letan.post(f'{API}/walk-ins/{ticket_id}/convert', {
+            'resources': {'1': res.id},
+        }, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['booking']['status'], 'checked_in')
+        items = r.data['booking']['items']
+        self.assertTrue(len(items) > 0)
+        self.assertEqual(items[0]['resource'], res.id)
+
+    def test_filter_by_status_and_date(self):
+        letan = self.as_user('letan')
+        # Tạo 2 vé: 1 waiting, 1 served
+        t1 = self.client.post(f'{API}/walk-ins', {'contact_name': 'A', 'pet_name': 'A1'}).data['id']
+        t2 = self.client.post(f'{API}/walk-ins', {'contact_name': 'B', 'pet_name': 'B1'}).data['id']
+        letan.post(f'{API}/walk-ins/{t2}/convert')
+
+        r_waiting = letan.get(f'{API}/walk-ins?status=waiting')
+        self.assertEqual(r_waiting.status_code, 200)
+        self.assertEqual(len(r_waiting.data['results']), 1)
+        self.assertEqual(r_waiting.data['results'][0]['id'], t1)
+
+        r_served = letan.get(f'{API}/walk-ins?status=served')
+        self.assertEqual(r_served.status_code, 200)
+        self.assertEqual(len(r_served.data['results']), 1)
+        self.assertEqual(r_served.data['results'][0]['id'], t2)
+
+
 

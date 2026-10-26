@@ -1,6 +1,8 @@
-from datetime import time
+from datetime import datetime, time, timedelta
 
 from django.db import transaction
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -9,7 +11,8 @@ from rest_framework.response import Response
 
 from accounts.models import Role, User
 from accounts.permissions import IsStaffRole
-from catalog.models import Specialty
+from catalog.models import ResourceType, Specialty
+from scheduling.models import BookingItem, BookingStatus
 
 from .models import Resource, Spa, StaffProfile, TimeOff, WorkShift
 
@@ -443,7 +446,6 @@ class ResourceViewSet(viewsets.ModelViewSet):
         return qs.filter(resource_type=t) if t else qs
 
     def perform_destroy(self, instance):
-        from django.utils import timezone
         from rest_framework.exceptions import ValidationError
         from scheduling.models import ACTIVE_STATUSES, BookingItem
 
@@ -458,3 +460,113 @@ class ResourceViewSet(viewsets.ModelViewSet):
             )
         instance.delete()
 
+    @action(detail=False, methods=['get'])
+    def occupancy(self, request):
+        """Sơ đồ chiếm dụng tài nguyên thời gian thực & theo ngày (SPA-16, SPA-17)."""
+        day_str = request.query_params.get('date')
+        target_day = parse_date(day_str) if day_str else timezone.localdate()
+        if not target_day:
+            target_day = timezone.localdate()
+
+        day_start = timezone.make_aware(datetime.combine(target_day, time(0, 0, 0)))
+        day_end = day_start + timedelta(days=1)
+        is_today = (target_day == timezone.localdate())
+
+        resources = list(self.get_queryset().order_by('resource_type', 'name'))
+        res_ids = [r.id for r in resources]
+
+        # Lấy tất cả BookingItem của ngày này
+        day_items = (BookingItem.objects
+                     .filter(resource_id__in=res_ids, start_at__gte=day_start, start_at__lt=day_end)
+                     .exclude(booking__status=BookingStatus.CANCELLED)
+                     .select_related('booking', 'booking__pet', 'booking__staff', 'booking__client', 'service')
+                     .order_by('start_at'))
+
+        # Lấy các BookingItem đang chiếm dụng thực tế (checked_in hoặc in_progress)
+        currently_busy_items = (BookingItem.objects
+                                .filter(resource_id__in=res_ids,
+                                        booking__status__in=(BookingStatus.CHECKED_IN, BookingStatus.IN_PROGRESS))
+                                .select_related('booking', 'booking__pet', 'booking__staff', 'booking__client', 'service'))
+        busy_by_res = {item.resource_id: item for item in currently_busy_items}
+
+        # Gom danh sách lịch theo resource
+        items_by_res = {}
+        for it in day_items:
+            items_by_res.setdefault(it.resource_id, []).append(it)
+
+        resource_data = []
+        for r in resources:
+            cur_item = busy_by_res.get(r.id) if is_today else None
+            is_occupied = cur_item is not None
+
+            cur_info = None
+            if cur_item:
+                cur_info = {
+                    'booking_id': cur_item.booking_id,
+                    'booking_status': cur_item.booking.status,
+                    'pet_id': cur_item.booking.pet_id,
+                    'pet_name': cur_item.booking.pet.name,
+                    'pet_species': cur_item.booking.pet.species,
+                    'pet_breed': cur_item.booking.pet.breed,
+                    'client_name': cur_item.booking.client.full_name if cur_item.booking.client else None,
+                    'client_phone': cur_item.booking.client.phone if cur_item.booking.client else None,
+                    'staff_name': str(cur_item.booking.staff) if cur_item.booking.staff else None,
+                    'service_name': cur_item.service.name,
+                    'start_at': cur_item.start_at.isoformat(),
+                    'end_at': cur_item.end_at.isoformat(),
+                    'checked_in_at': cur_item.booking.checked_in_at.isoformat() if cur_item.booking.checked_in_at else None,
+                }
+
+            schedule = []
+            for it in items_by_res.get(r.id, []):
+                schedule.append({
+                    'item_id': it.id,
+                    'booking_id': it.booking_id,
+                    'booking_status': it.booking.status,
+                    'pet_name': it.booking.pet.name,
+                    'service_name': it.service.name,
+                    'staff_name': str(it.booking.staff) if it.booking.staff else None,
+                    'start_at': it.start_at.isoformat(),
+                    'end_at': it.end_at.isoformat(),
+                })
+
+            resource_data.append({
+                'id': r.id,
+                'name': r.name,
+                'resource_type': r.resource_type,
+                'is_active': r.is_active,
+                'is_occupied': is_occupied,
+                'current': cur_info,
+                'schedule': schedule,
+            })
+
+        total_count = len(resource_data)
+        occupied_count = sum(1 for r in resource_data if r['is_occupied'])
+        free_count = total_count - occupied_count
+        rate = round((occupied_count / total_count * 100), 1) if total_count > 0 else 0
+
+        by_type = {}
+        for rtype, label in ResourceType.choices:
+            type_res = [r for r in resource_data if r['resource_type'] == rtype]
+            t_total = len(type_res)
+            t_occ = sum(1 for r in type_res if r['is_occupied'])
+            by_type[rtype] = {
+                'label': label,
+                'total': t_total,
+                'occupied': t_occ,
+                'free': max(0, t_total - t_occ),
+                'rate': round((t_occ / t_total * 100), 1) if t_total > 0 else 0,
+            }
+
+        return Response({
+            'date': target_day.isoformat(),
+            'is_today': is_today,
+            'summary': {
+                'total': total_count,
+                'occupied': occupied_count,
+                'free': free_count,
+                'rate': rate,
+                'by_type': by_type,
+            },
+            'resources': resource_data,
+        })

@@ -13,10 +13,14 @@ from rest_framework.views import APIView
 from accounts.models import Role
 from accounts.permissions import IsFrontDesk
 from billing.models import Invoice
-from customers.models import Pet
+from catalog.models import Package, Service
+from customers.models import Client, Pet
 
 from . import services
-from .models import ACTIVE_STATUSES, Booking, BookingItem, BookingStatus
+from .models import (
+    ACTIVE_STATUSES, Booking, BookingItem, BookingStatus,
+    WalkInStatus, WalkInTicket,
+)
 
 FRONT_DESK = (Role.RECEPTIONIST, Role.MANAGER)
 
@@ -105,6 +109,17 @@ class BookingInputSerializer(serializers.Serializer):
     customer_note = serializers.CharField(required=False, allow_blank=True, default='')
     channel = serializers.ChoiceField(choices=['counter', 'walk_in'], required=False)
     confirm = serializers.BooleanField(required=False, default=True)
+    exclude_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class BookingUpdateSerializer(serializers.Serializer):
+    pet = serializers.PrimaryKeyRelatedField(queryset=Pet.objects.select_related('client'), required=False)
+    package = serializers.IntegerField(required=False, allow_null=True)
+    services = serializers.ListField(child=serializers.IntegerField(), required=False)
+    start_at = serializers.DateTimeField(required=False)
+    staff = serializers.IntegerField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+    customer_note = serializers.CharField(required=False, allow_blank=True)
 
 
 class CancelSerializer(serializers.Serializer):
@@ -163,7 +178,7 @@ class BookingViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
         d = s.validated_data
         pet = _pet_for(request.user, d['pet'])
         staff = d.get('staff') if request.user.role != Role.CUSTOMER else None
-        return Response(services.quote(pet, d.get('package'), d.get('services'), d['start_at'], staff))
+        return Response(services.quote(pet, d.get('package'), d.get('services'), d['start_at'], staff, exclude_id=d.get('exclude_id')))
 
     @action(detail=False, methods=['get'], url_path='availability')
     def availability(self, request):
@@ -193,6 +208,32 @@ class BookingViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             d['note'], d['customer_note'], d.get('channel'), d['confirm'])
         return Response(self._out(b, request), status=status.HTTP_201_CREATED)
 
+    def update(self, request, pk=None):
+        return self.partial_update(request, pk)
+
+    def partial_update(self, request, pk=None):
+        if request.user.role == Role.TECHNICIAN:
+            raise PermissionDenied()
+        booking = self.get_object()
+        s = BookingUpdateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        pet = None
+        if 'pet' in d:
+            pet = _pet_for(request.user, d['pet'])
+        b = services.update_booking(
+            booking=booking,
+            user=request.user,
+            pet=pet,
+            package_id=d.get('package'),
+            service_ids=d.get('services'),
+            start_at=d.get('start_at'),
+            staff_id=d.get('staff'),
+            note=d.get('note'),
+            customer_note=d.get('customer_note'),
+        )
+        return Response(self._out(b, request))
+
     def _out(self, booking, request):
         booking = self.get_queryset().get(pk=booking.pk) if request.user.role != Role.TECHNICIAN else \
             Booking.objects.get(pk=booking.pk)
@@ -206,6 +247,26 @@ class BookingViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
     def confirm(self, request, pk=None):
         self._front_desk_only(request)
         return Response(self._out(services.confirm(self.get_object(), request.user), request))
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        self._front_desk_only(request)
+        s = CancelSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        b = services.cancel(self.get_object(), request.user, s.validated_data['reason'], code='rejected')
+        return Response(self._out(b, request))
+
+    @action(detail=False, methods=['get'])
+    def calendar(self, request):
+        p = request.query_params
+        d_from = parse_date(p.get('from') or p.get('date_from', ''))
+        d_to = parse_date(p.get('to') or p.get('date_to', ''))
+        qs = self.get_queryset()
+        if d_from:
+            qs = qs.filter(start_at__gte=_day_start(d_from))
+        if d_to:
+            qs = qs.filter(start_at__lt=_day_start(d_to + timedelta(days=1)))
+        return Response([self._out(b, request) for b in qs])
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
@@ -358,3 +419,176 @@ class DashboardView(APIView):
             'resources_summary': res_summary,
             'in_service_count': in_service_count,
         })
+
+
+# ==============================================================================
+# SERIALIZERS & VIEWSET CHO HÀNG ĐỢI WALK-IN (SPA-18)
+# ==============================================================================
+
+class WalkInTicketSerializer(serializers.ModelSerializer):
+    queue_code = serializers.SerializerMethodField()
+    client_name = serializers.CharField(source='client.full_name', read_only=True, default=None)
+    service_name = serializers.CharField(source='service.name', read_only=True, default=None)
+    package_name = serializers.CharField(source='package.name', read_only=True, default=None)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    booking_id = serializers.IntegerField(source='booking.id', read_only=True, default=None)
+
+    class Meta:
+        model = WalkInTicket
+        fields = [
+            'id', 'date', 'queue_no', 'queue_code', 'contact_name', 'phone',
+            'client', 'client_name', 'pet', 'pet_name', 'pet_species',
+            'service', 'service_name', 'package', 'package_name',
+            'status', 'status_label', 'estimated_wait_minutes',
+            'booking', 'booking_id', 'note',
+            'called_at', 'served_at', 'left_at', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'date', 'queue_no', 'queue_code', 'status', 'status_label',
+            'estimated_wait_minutes', 'booking', 'booking_id',
+            'called_at', 'served_at', 'left_at', 'created_at', 'updated_at',
+        ]
+
+    def get_queue_code(self, obj):
+        return f'#{obj.queue_no:02d}'
+
+
+class WalkInTicketCreateSerializer(serializers.Serializer):
+    contact_name = serializers.CharField(max_length=120, required=False, allow_blank=True, default='')
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True, default='')
+    pet_name = serializers.CharField(max_length=120, required=False, allow_blank=True, default='')
+    pet_species = serializers.ChoiceField(choices=[('dog', 'Chó'), ('cat', 'Mèo')], default='dog')
+    service = serializers.PrimaryKeyRelatedField(queryset=Service.objects.filter(is_active=True), required=False, allow_null=True, default=None)
+    package = serializers.PrimaryKeyRelatedField(queryset=Package.objects.filter(is_active=True), required=False, allow_null=True, default=None)
+    client = serializers.PrimaryKeyRelatedField(queryset=Client.objects.all(), required=False, allow_null=True, default=None)
+    pet = serializers.PrimaryKeyRelatedField(queryset=Pet.objects.all(), required=False, allow_null=True, default=None)
+    note = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class WalkInTicketViewSet(viewsets.ModelViewSet):
+    """Quản lý hàng đợi khách vãng lai tại quầy (SPA-18)."""
+
+    queryset = WalkInTicket.objects.select_related('client', 'pet', 'service', 'package', 'booking').all()
+    serializer_class = WalkInTicketSerializer
+
+    def get_permissions(self):
+        if self.action in ['create', 'kiosk']:
+            return []
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        day_str = self.request.query_params.get('date')
+        target_day = parse_date(day_str) if day_str else timezone.localdate()
+        if not target_day:
+            target_day = timezone.localdate()
+        qs = self.queryset.filter(date=target_day)
+        st = self.request.query_params.get('status')
+        if st:
+            qs = qs.filter(status=st)
+        return qs.order_by('queue_no')
+
+    def list(self, request, *args, **kwargs):
+        if request.user.role not in FRONT_DESK:
+            raise PermissionDenied()
+        qs = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(qs, many=True)
+
+        day_str = request.query_params.get('date')
+        target_day = parse_date(day_str) if day_str else timezone.localdate()
+        day_tickets = WalkInTicket.objects.filter(date=target_day)
+
+        waiting = day_tickets.filter(status=WalkInStatus.WAITING).count()
+        called = day_tickets.filter(status=WalkInStatus.CALLED).count()
+        served = day_tickets.filter(status=WalkInStatus.SERVED).count()
+        left = day_tickets.filter(status=WalkInStatus.LEFT).count()
+        total = day_tickets.count()
+
+        current_called_ticket = day_tickets.filter(status=WalkInStatus.CALLED).order_by('-called_at').first()
+        next_waiting_ticket = day_tickets.filter(status=WalkInStatus.WAITING).order_by('queue_no').first()
+
+        avg_wait = 15
+        if waiting > 0:
+            avg_wait = next_waiting_ticket.estimated_wait_minutes if next_waiting_ticket else 15
+
+        return Response({
+            'date': target_day,
+            'summary': {
+                'total': total,
+                'waiting': waiting,
+                'called': called,
+                'served': served,
+                'left': left,
+                'current_called': current_called_ticket.queue_no if current_called_ticket else None,
+                'next_waiting': next_waiting_ticket.queue_no if next_waiting_ticket else None,
+                'average_wait_minutes': avg_wait,
+            },
+            'results': serializer.data,
+        })
+
+    def create(self, request, *args, **kwargs):
+        s = WalkInTicketCreateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        ticket = services.create_walk_in(
+            contact_name=d.get('contact_name'),
+            phone=d.get('phone'),
+            pet_name=d.get('pet_name'),
+            pet_species=d.get('pet_species', 'dog'),
+            service=d.get('service'),
+            package=d.get('package'),
+            client=d.get('client'),
+            pet=d.get('pet'),
+            note=d.get('note', ''),
+        )
+        return Response(self.get_serializer(ticket).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def call(self, request, pk=None):
+        if request.user.role not in FRONT_DESK:
+            raise PermissionDenied()
+        ticket = self.get_object()
+        ticket = services.call_walk_in(ticket, request.user)
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=True, methods=['post'])
+    def convert(self, request, pk=None):
+        if request.user.role not in FRONT_DESK:
+            raise PermissionDenied()
+        ticket = self.get_object()
+        staff_id = request.data.get('staff')
+        raw_resources = request.data.get('resources')
+        assignments = None
+        if raw_resources:
+            try:
+                assignments = {int(k): int(v) for k, v in raw_resources.items()}
+            except (ValueError, TypeError, AttributeError):
+                raise ValidationError({'resources': 'Dạng {mã_dòng: mã_tài_nguyên}.'})
+
+        ticket, booking = services.convert_walk_in(ticket, request.user, staff_id=staff_id, assignments=assignments)
+        return Response({
+            'ticket': self.get_serializer(ticket).data,
+            'booking': BookingDetailSerializer(booking, context={'request': request}).data,
+        })
+
+    @action(detail=True, methods=['post'])
+    def leave(self, request, pk=None):
+        if request.user.role not in FRONT_DESK:
+            raise PermissionDenied()
+        ticket = self.get_object()
+        reason = request.data.get('reason', '')
+        ticket = services.leave_walk_in(ticket, request.user, reason=reason)
+        return Response(self.get_serializer(ticket).data)
+
+    @action(detail=False, methods=['get'])
+    def kiosk(self, request):
+        today = timezone.localdate()
+        day_tickets = WalkInTicket.objects.filter(date=today)
+        called = day_tickets.filter(status=WalkInStatus.CALLED).order_by('-called_at')[:5]
+        waiting = day_tickets.filter(status=WalkInStatus.WAITING).order_by('queue_no')[:5]
+        return Response({
+            'date': today,
+            'called': self.get_serializer(called, many=True).data,
+            'waiting': self.get_serializer(waiting, many=True).data,
+            'waiting_count': day_tickets.filter(status=WalkInStatus.WAITING).count(),
+        })
+

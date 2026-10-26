@@ -153,6 +153,7 @@ class Command(BaseCommand):
         self._clients_and_pets(tags)
         self._staff_and_resources()
         self._bookings()
+        self._walk_ins()
         self._ai_data()
         self._seed_notifications()
 
@@ -317,6 +318,34 @@ class Command(BaseCommand):
                 if paid:
                     billing_services.pay(inv, letan, 'cash')
                     Invoice.objects.filter(pk=inv.pk).update(paid_at=end_at)
+
+    def _walk_ins(self):
+        """Dữ liệu hàng đợi khách vãng lai mẫu trong ngày (SPA-18)."""
+        from scheduling.models import WalkInTicket, WalkInStatus
+        from catalog.models import Service, Package
+        WalkInTicket.objects.all().delete()
+        today = timezone.localdate()
+        s_bath = Service.objects.filter(code='bath_basic').first()
+        s_cat = Service.objects.filter(code='cat_spa').first()
+        pkg_vip = Package.objects.filter(code='vip').first()
+
+        now = timezone.now()
+        WalkInTicket.objects.create(
+            date=today, queue_no=1, contact_name='Anh Tuấn', phone='0912345671',
+            pet_name='Bé Bông', pet_species='dog', service=s_bath, status=WalkInStatus.CALLED,
+            called_at=now - timedelta(minutes=5), estimated_wait_minutes=5,
+            note='Khách quen vãng lai, yêu cầu tắm sấy thơm dịu'
+        )
+        WalkInTicket.objects.create(
+            date=today, queue_no=2, contact_name='Chị Lan', phone='0987654321',
+            pet_name='Bé Miu', pet_species='cat', service=s_cat, status=WalkInStatus.WAITING,
+            estimated_wait_minutes=15, note='Mèo sợ nước, dặn KTV nhẹ tay'
+        )
+        WalkInTicket.objects.create(
+            date=today, queue_no=3, contact_name='Anh Dũng', phone='0909090909',
+            pet_name='Bé Cún', pet_species='dog', package=pkg_vip, status=WalkInStatus.WAITING,
+            estimated_wait_minutes=35, note='Khách mới lần đầu đến spa'
+        )
 
     def _ai_data(self):
         """Dữ liệu mẫu cho module AI: Chống chỉ định, Luật chu kỳ, Tri thức SOP/Giá."""
