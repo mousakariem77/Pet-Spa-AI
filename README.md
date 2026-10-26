@@ -20,7 +20,9 @@ Pet Spa AI/
 
 Chỉ có hai nhánh mã nguồn là `backend/` và `frontend/`.
 
-## Chạy thử (Windows PowerShell)
+## Hướng dẫn cài đặt và chạy thử
+
+### 1. Dành cho Windows (PowerShell)
 
 ```powershell
 # Backend
@@ -31,16 +33,55 @@ python -m venv .venv
 $env:PYTHONUTF8='1'; .venv\Scripts\python manage.py seed_demo
 .venv\Scripts\python manage.py runserver 127.0.0.1:8000
 
-# Frontend (cửa sổ khác)
+# Frontend (mở thêm cửa sổ PowerShell khác)
 cd frontend
 npm install
 npm run dev
 
-# Test backend
+# Chạy test backend
 cd backend; .venv\Scripts\python manage.py test
 ```
 
-Tài khoản demo (mật khẩu `Demo@12345`): `quanly`, `letan`, `ktv1`, `ktv2`, `ktv3`, `khach1`. Chạy lại `seed_demo` sẽ đặt lại lịch và hóa đơn mẫu.
+### 2. Dành cho macOS / Linux (Terminal - zsh/bash)
+
+```bash
+# Backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver 127.0.0.1:8000
+
+# Frontend (mở thêm tab hoặc cửa sổ Terminal khác)
+cd frontend
+npm install
+npm run dev
+
+# Chạy test backend (đã kích hoạt venv)
+cd backend && python manage.py test
+# hoặc chạy trực tiếp mà không cần activate:
+# cd backend && .venv/bin/python manage.py test
+```
+
+> **Lưu ý trên macOS/Linux:**
+> - Sử dụng `python3` và `pip3` nếu hệ thống chưa gán alias `python`.
+> - Kích hoạt môi trường ảo bằng lệnh `source .venv/bin/activate` (khi muốn thoát gõ `deactivate`). Sau khi kích hoạt, lệnh `python` và `pip` sẽ tự động trỏ đến `.venv`.
+> - Mặc định trên macOS / Linux môi trường đã dùng chuẩn UTF-8 nên không cần thiết lập `$env:PYTHONUTF8`. Trường hợp hiếm gặp nếu xuất hiện lỗi font khi chạy `seed_demo`, có thể dùng: `PYTHONUTF8=1 python manage.py seed_demo`.
+
+### Tài khoản demo
+
+Tài khoản demo (mật khẩu chung: `Demo@12345`):
+- Quản lý: `quanly`
+- Lễ tân: `letan`
+- Kỹ thuật viên: `ktv1`, `ktv2`, `ktv3`
+- Khách hàng: `khach1`
+
+> *Ghi chú:* Chạy lại `seed_demo` bất cứ lúc nào để làm mới lại dữ liệu lịch hẹn và hóa đơn mẫu.
+
+- **Frontend URL:** http://localhost:5173
+- **Backend API:** http://127.0.0.1:8000/api/
 
 ## Cách đọc thiết kế
 
