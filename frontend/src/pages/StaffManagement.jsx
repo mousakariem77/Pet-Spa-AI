@@ -22,6 +22,14 @@ const RESOURCE_TYPE_MAP = {
   spa_room: { label: 'Phòng spa', color: 'purple' },
 }
 
+const specialtyCodeFromName = (name) => name
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[đĐ]/g, 'D')
+  .toUpperCase()
+  .replace(/[^A-Z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '')
+
 export default function StaffManagement() {
   const { user } = useAuth()
   const isManager = user?.role === 'manager'
@@ -35,11 +43,15 @@ export default function StaffManagement() {
   const [staffModalOpen, setStaffModalOpen] = useState(false)
   const [editingStaff, setEditingStaff] = useState(null)
   const [staffForm] = Form.useForm()
+  const [specialtySearch, setSpecialtySearch] = useState('')
+  const [creatingSpecialty, setCreatingSpecialty] = useState(false)
 
-  // Ca làm việc & Ngày nghỉ
+  // Ca làm việc & Ngày nghỉ trong màn quản lý nhân viên
   const [shiftModalOpen, setShiftModalOpen] = useState(false)
   const [shiftStaff, setShiftStaff] = useState(null)
   const [shifts, setShifts] = useState([])
+  const [shiftForm] = Form.useForm()
+  const [shiftSaving, setShiftSaving] = useState(false)
   const [timeOffList, setTimeOffList] = useState([])
   const [timeOffForm] = Form.useForm()
 
@@ -49,7 +61,14 @@ export default function StaffManagement() {
   const [resPage, setResPage] = useState(1)
   const [resPageSize, setResPageSize] = useState(10)
   const [resModalOpen, setResModalOpen] = useState(false)
+  const [resSaving, setResSaving] = useState(false)
   const [resForm] = Form.useForm()
+
+  const openResourceModal = () => {
+    resForm.resetFields()
+    resForm.setFieldsValue({ resource_type: 'bath_tub' })
+    setResModalOpen(true)
+  }
 
   const loadStaff = useCallback(async () => {
     setStaffLoading(true)
@@ -70,10 +89,13 @@ export default function StaffManagement() {
   const loadResources = useCallback(async () => {
     setResLoading(true)
     try {
-      const res = await api('/resources?include_inactive=1')
-      setResources(unwrap(res))
+      const res = await api('/resources?include_inactive=1&page_size=100')
+      const loadedResources = unwrap(res)
+      setResources(loadedResources)
+      return loadedResources
     } catch (e) {
       message.error(e.message || 'Không thể tải danh sách tài nguyên')
+      return []
     } finally {
       setResLoading(false)
     }
@@ -123,6 +145,36 @@ export default function StaffManagement() {
     }
   }
 
+  const createSpecialty = async (selectedIds) => {
+    const name = specialtySearch.trim()
+    if (!name || creatingSpecialty) return
+
+    setCreatingSpecialty(true)
+    try {
+      const baseCode = specialtyCodeFromName(name).slice(0, 50) || 'CHUYEN_MON'
+      let code = baseCode
+      let suffix = 2
+      while (specialties.some((specialty) => specialty.code === code)) {
+        const ending = `_${suffix}`
+        code = `${baseCode.slice(0, 50 - ending.length).replace(/_+$/g, '')}${ending}`
+        suffix += 1
+      }
+
+      const created = await api('/specialties', {
+        method: 'POST',
+        body: { code, name_vi: name },
+      })
+      setSpecialties((current) => [...current, created])
+      staffForm.setFieldValue('specialties', [...selectedIds, created.id])
+      setSpecialtySearch('')
+      message.success(`Đã thêm chuyên môn "${created.name_vi}"`)
+    } catch (e) {
+      message.error(e.message || 'Không thể thêm chuyên môn')
+    } finally {
+      setCreatingSpecialty(false)
+    }
+  }
+
   // Khóa nhân viên
   const toggleStaffActive = async (st) => {
     try {
@@ -141,18 +193,48 @@ export default function StaffManagement() {
   // Quản lý ca làm & ngày nghỉ
   const openShifts = async (st) => {
     setShiftStaff(st)
+    shiftForm.resetFields()
+    timeOffForm.resetFields()
     setShiftModalOpen(true)
     try {
-      const [shs, tos] = await Promise.all([
+      const [loadedShifts, tos] = await Promise.all([
         api(`/staff/${st.id}/shifts`),
         api(`/staff/${st.id}/time-off`),
       ])
-      setShifts(shs)
+      setShifts(loadedShifts)
       setTimeOffList(tos)
+      shiftForm.setFieldsValue({
+        shifts: loadedShifts.map((shift) => ({
+          ...shift,
+          start_time: shift.start_time?.slice(0, 5),
+          end_time: shift.end_time?.slice(0, 5),
+        })),
+      })
     } catch {
       // ignore
     }
   }
+
+  const saveShifts = async () => {
+    try {
+      const { shifts: values = [] } = await shiftForm.validateFields()
+      setShiftSaving(true)
+      const updated = await api(`/staff/${shiftStaff.id}/shifts`, {
+        method: 'PUT',
+        body: values.map(({ weekday, start_time, end_time }) => ({ weekday, start_time, end_time })),
+      })
+      setShifts(updated)
+      message.success('Đã cập nhật lịch làm việc')
+    } catch (e) {
+      const fields = toFormErrors(e)
+      if (fields.length) shiftForm.setFields(fields)
+      else message.error(e.message || 'Không thể lưu lịch làm việc')
+    } finally {
+      setShiftSaving(false)
+    }
+  }
+
+  const canEditShifts = isManager || shiftStaff?.user_id === user?.id
 
   const addTimeOff = async () => {
     try {
@@ -188,13 +270,20 @@ export default function StaffManagement() {
   const saveResource = async () => {
     try {
       const v = await resForm.validateFields()
-      await api('/resources', { method: 'POST', body: JSON.stringify(v) })
+      setResSaving(true)
+      const createdResource = await api('/resources', { method: 'POST', body: JSON.stringify(v) })
       message.success('Đã thêm tài nguyên mới')
       setResModalOpen(false)
       resForm.resetFields()
-      loadResources()
+      const updatedResources = await loadResources()
+      const createdIndex = updatedResources.findIndex((resource) => resource.id === createdResource.id)
+      if (createdIndex >= 0) setResPage(Math.floor(createdIndex / resPageSize) + 1)
     } catch (e) {
+      const fields = toFormErrors(e)
+      if (fields.length) resForm.setFields(fields)
       message.error(e.message || 'Lỗi khi thêm tài nguyên')
+    } finally {
+      setResSaving(false)
     }
   }
 
@@ -312,18 +401,18 @@ export default function StaffManagement() {
         <div>
           <Title level={3} style={{ margin: 0 }}>Nhân Sự & Cơ Sở Vật Chất</Title>
           <Paragraph type="secondary" style={{ margin: 0 }}>
-            Quản lý đội ngũ kỹ thuật viên, phân công ca làm và giám sát năng lực bồn/bàn spa
+            Quản lý đội ngũ kỹ thuật viên, ca làm, ngày nghỉ và cơ sở vật chất
           </Paragraph>
         </div>
 
         <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={() => { loadStaff(); loadResources() }}>Làm mới</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { loadStaff(); loadResources() }}>Làm mới</Button>
           {isManager && (
             <>
               <Button type="primary" icon={<UserAddOutlined />} onClick={() => openStaffModal(null)}>
                 Thêm nhân viên
               </Button>
-              <Button icon={<ToolOutlined />} onClick={() => setResModalOpen(true)}>
+              <Button icon={<ToolOutlined />} onClick={openResourceModal}>
                 Thêm tài nguyên
               </Button>
             </>
@@ -331,7 +420,7 @@ export default function StaffManagement() {
         </Space>
       </div>
 
-      <Tabs
+          <Tabs
         type="card"
         items={[
           {
@@ -340,7 +429,7 @@ export default function StaffManagement() {
             children: (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 13 }}>💡 Bấm vào bất kỳ nhân viên nào để xem và thiết lập ca làm & ngày nghỉ</Text>
+                  <Text type="secondary" style={{ fontSize: 13 }}>💡 Bấm vào nhân viên để quản lý ca làm và ngày nghỉ</Text>
                   <RowPerPageSelect value={staffPageSize} onChange={(ps) => { setStaffPageSize(ps); setStaffPage(1); }} />
                 </div>
                 <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 16, overflow: 'hidden' }}>
@@ -467,8 +556,38 @@ export default function StaffManagement() {
           <Form.Item name="specialties" label="Chuyên môn tay nghề">
             <Select
               mode="multiple"
-              placeholder="Chọn chuyên môn"
+              placeholder="Tìm hoặc chọn chuyên môn"
+              searchValue={specialtySearch}
+              onSearch={setSpecialtySearch}
+              filterOption={(input, option) => option.label.toLowerCase().includes(input.toLowerCase())}
               options={specialties.map((s) => ({ value: s.id, label: s.name_vi }))}
+              loading={creatingSpecialty}
+              dropdownRender={(menu) => {
+                const query = specialtySearch.trim()
+                const hasMatch = specialties.some((specialty) =>
+                  specialty.name_vi.toLowerCase().includes(query.toLowerCase()))
+
+                return (
+                  <>
+                    {menu}
+                    <div style={{ height: 1, margin: '4px 0', background: '#f0f0f0' }} />
+                    <Button
+                      type="link"
+                      block
+                      disabled={!query || hasMatch}
+                      loading={creatingSpecialty}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => createSpecialty(staffForm.getFieldValue('specialties') || [])}
+                    >
+                      {query
+                        ? hasMatch
+                          ? 'Chuyên môn đã có trong danh sách'
+                          : `+ Thêm chuyên môn "${query}"`
+                        : '+ Nhập tên để thêm chuyên môn mới'}
+                    </Button>
+                  </>
+                )
+              }}
             />
           </Form.Item>
 
@@ -497,11 +616,68 @@ export default function StaffManagement() {
                   <Alert
                     type="info"
                     showIcon
-                    message="Quy định ca làm việc"
-                    description="Kỹ thuật viên có ca làm hợp lệ mới được phân công vào lịch hẹn của khách."
+                    message="Đăng ký ca làm định kỳ"
+                    description="Lịch này được dùng để xác định thời gian nhân viên có thể nhận lịch hẹn."
                     style={{ marginBottom: 16 }}
                   />
-                  {shifts.length > 0 ? (
+                  {canEditShifts ? (
+                    <Form form={shiftForm} layout="vertical">
+                      <Form.List name="shifts">
+                        {(fields, { add, remove }) => (
+                          <>
+                            {fields.map((field) => (
+                              <Row gutter={10} align="middle" key={field.key}>
+                                <Col span={8}>
+                                  <Form.Item
+                                    name={[field.name, 'weekday']}
+                                    label={field.name === 0 ? 'Ngày' : undefined}
+                                    rules={[{ required: true, message: 'Chọn ngày' }]}
+                                  >
+                                    <Select options={WEEKDAYS.map((label, value) => ({ value, label }))} />
+                                  </Form.Item>
+                                </Col>
+                                <Col span={6}>
+                                  <Form.Item
+                                    name={[field.name, 'start_time']}
+                                    label={field.name === 0 ? 'Bắt đầu' : undefined}
+                                    rules={[{ required: true, message: 'Chọn giờ bắt đầu' }]}
+                                  >
+                                    <Input type="time" />
+                                  </Form.Item>
+                                </Col>
+                                <Col span={6}>
+                                  <Form.Item
+                                    name={[field.name, 'end_time']}
+                                    label={field.name === 0 ? 'Kết thúc' : undefined}
+                                    rules={[{ required: true, message: 'Chọn giờ kết thúc' }]}
+                                  >
+                                    <Input type="time" />
+                                  </Form.Item>
+                                </Col>
+                                <Col span={4}>
+                                  <Button
+                                    danger
+                                    type="text"
+                                    aria-label="Xóa ca làm"
+                                    icon={<DeleteOutlined />}
+                                    onClick={() => remove(field.name)}
+                                  />
+                                </Col>
+                              </Row>
+                            ))}
+                            <Space>
+                              <Button icon={<PlusOutlined />} onClick={() => add({ weekday: 0 })}>
+                                Thêm ca
+                              </Button>
+                              <Button type="primary" loading={shiftSaving} onClick={saveShifts}>
+                                Lưu lịch làm việc
+                              </Button>
+                            </Space>
+                          </>
+                        )}
+                      </Form.List>
+                    </Form>
+                  ) : shifts.length > 0 ? (
                     shifts.map((s) => (
                       <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
                         <Text strong>{WEEKDAYS[s.weekday]}</Text>
@@ -567,13 +743,15 @@ export default function StaffManagement() {
         onCancel={() => setResModalOpen(false)}
         onOk={saveResource}
         okText="Thêm mới"
+        confirmLoading={resSaving}
       >
         <Form form={resForm} layout="vertical">
           <Form.Item name="name" label="Tên tài nguyên" rules={[{ required: true, message: 'Nhập tên' }]}>
             <Input placeholder="Ví dụ: Bàn cắt 4, Chuồng sấy 5..." />
           </Form.Item>
-          <Form.Item name="resource_type" label="Loại tài nguyên" rules={[{ required: true }]}>
+          <Form.Item name="resource_type" label="Loại tài nguyên" rules={[{ required: true, message: 'Chọn loại tài nguyên' }]}>
             <Select
+              placeholder="Chọn loại tài nguyên"
               options={[
                 { value: 'bath_tub', label: 'Bồn tắm' },
                 { value: 'grooming_table', label: 'Bàn cắt tỉa' },

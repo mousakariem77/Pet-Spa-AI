@@ -5,10 +5,9 @@ import {
   Switch, Table, Tabs, Tag, Typography,
 } from 'antd'
 import {
-  CalendarOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined,
+  DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined,
   ReloadOutlined, ShopOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
 import { api, money, toFormErrors, unwrap } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import RowPerPageSelect from '../components/RowPerPageSelect.jsx'
@@ -17,7 +16,58 @@ const { Title, Text, Paragraph } = Typography
 
 const SIZES = ['XS', 'S', 'M', 'L', 'XL']
 const SPECIES = { dog: 'Chó', cat: 'Mèo', both: 'Chó, mèo' }
+const SIZE_WEIGHT_RANGES = {
+  dog: { XS: '<3kg', S: '3-<7kg', M: '7-<15kg', L: '15-<30kg', XL: '>=30kg' },
+  cat: { XS: '<3kg', S: '3-<4.5kg', M: '4.5-<6kg', L: '6-<8kg', XL: '>=8kg' },
+}
 const CATEGORY = { bath: 'Tắm', grooming: 'Cắt tỉa', ear: 'Vệ sinh tai', spa: 'Spa dưỡng', other: 'Khác' }
+const RESOURCE_TYPES = {
+  bath_tub: 'Bồn tắm',
+  grooming_table: 'Bàn cắt tỉa',
+  drying_cage: 'Chuồng sấy',
+  spa_room: 'Phòng spa',
+}
+
+const formatPriceInput = (value) => (value == null ? '' : `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.'))
+const parsePriceInput = (value) => value?.replace(/\./g, '')
+
+function generateServiceCode(name, services) {
+  const normalizedName = (name || 'DICH_VU')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'D')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  const base = `DV_${normalizedName || 'DICH_VU'}`.slice(0, 50).replace(/_+$/g, '')
+  let code = base
+  let suffix = 2
+  while (services.some((service) => service.code === code)) {
+    const ending = `_${suffix}`
+    code = `${base.slice(0, 50 - ending.length).replace(/_+$/g, '')}${ending}`
+    suffix += 1
+  }
+  return code
+}
+
+function generatePackageCode(name, packages) {
+  const normalizedName = (name || 'GOI_DICH_VU')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'D')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+  const base = `GOI_${normalizedName || 'DICH_VU'}`.slice(0, 50).replace(/_+$/g, '')
+  let code = base
+  let suffix = 2
+  while (packages.some((pkg) => pkg.code === code)) {
+    const ending = `_${suffix}`
+    code = `${base.slice(0, 50 - ending.length).replace(/_+$/g, '')}${ending}`
+    suffix += 1
+  }
+  return code
+}
 
 // Modal sửa giá nhanh
 function PriceModal({ target, kind, onClose, onSaved }) {
@@ -61,7 +111,14 @@ function PriceModal({ target, kind, onClose, onSaved }) {
       <Form form={form} layout="vertical">
         {SIZES.map((s) => (
           <Form.Item key={s} name={s} label={`Size ${s} (₫)`} rules={[{ type: 'number', min: 0 }]}>
-            <InputNumber style={{ width: '100%' }} step={5000} min={0} placeholder="Nhập giá theo VNĐ..." />
+            <InputNumber
+              style={{ width: '100%' }}
+              step={5000}
+              min={0}
+              placeholder="Nhập giá theo VNĐ..."
+              formatter={formatPriceInput}
+              parser={parsePriceInput}
+            />
           </Form.Item>
         ))}
       </Form>
@@ -72,7 +129,6 @@ function PriceModal({ target, kind, onClose, onSaved }) {
 export default function Catalog() {
   const { message } = App.useApp()
   const { user } = useAuth()
-  const nav = useNavigate()
   const isManager = user?.role === 'manager'
 
   const [activeTab, setActiveTab] = useState('s')
@@ -93,12 +149,18 @@ export default function Catalog() {
   const [editingService, setEditingService] = useState(null)
   const [serviceBusy, setServiceBusy] = useState(false)
   const [serviceForm] = Form.useForm()
+  const serviceName = Form.useWatch('name', serviceForm)
+  const serviceSpeciesScope = Form.useWatch('species_scope', serviceForm) || 'both'
+  const generatedServiceCode = generateServiceCode(serviceName, services)
 
   // Modal thêm/sửa gói combo
   const [packageModalOpen, setPackageModalOpen] = useState(false)
   const [editingPackage, setEditingPackage] = useState(null)
   const [packageBusy, setPackageBusy] = useState(false)
   const [packageForm] = Form.useForm()
+  const packageName = Form.useWatch('name', packageForm)
+  const packageSpeciesScope = Form.useWatch('species_scope', packageForm) || 'both'
+  const generatedPackageCode = generatePackageCode(packageName, packages)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -120,6 +182,7 @@ export default function Catalog() {
     serviceForm.setFieldsValue({
       category: 'bath',
       species_scope: 'both',
+      resource_type: 'bath_tub',
       duration_minutes: 30,
       XS: 100000,
       S: 120000,
@@ -130,17 +193,34 @@ export default function Catalog() {
     setServiceModalOpen(true)
   }
 
+  const openEditService = (service) => {
+    setEditingService(service)
+    serviceForm.resetFields()
+    serviceForm.setFieldsValue({
+      name: service.name,
+      category: service.category,
+      species_scope: service.species_scope,
+      resource_type: service.resource_type,
+      duration_minutes: service.duration_minutes,
+      description: service.description,
+      ...service.prices,
+    })
+    setDetailItem(null)
+    setServiceModalOpen(true)
+  }
+
   const handleSaveService = async () => {
     try {
       const values = await serviceForm.validateFields()
       setServiceBusy(true)
 
       const payload = {
-        code: values.code || `DV_${Date.now()}`,
+        code: editingService?.code || generatedServiceCode,
         name: values.name,
         description: values.description || '',
         category: values.category,
         species_scope: values.species_scope,
+        resource_type: values.resource_type,
         duration_minutes: values.duration_minutes,
       }
 
@@ -171,6 +251,39 @@ export default function Catalog() {
     }
   }
 
+  const deleteService = async (service) => {
+    try {
+      await api(`/services/${service.id}`, { method: 'DELETE' })
+      message.success('Đã ẩn dịch vụ khỏi danh mục.')
+      setDetailItem(null)
+      load()
+    } catch (e) {
+      message.error(e.message || 'Không thể xóa dịch vụ.')
+    }
+  }
+
+  const restoreService = async (service) => {
+    try {
+      await api(`/services/${service.id}`, { method: 'PATCH', body: { is_active: true } })
+      message.success('Đã hiển thị lại dịch vụ.')
+      setDetailItem(null)
+      load()
+    } catch (e) {
+      message.error(e.message || 'Không thể hiển thị lại dịch vụ.')
+    }
+  }
+
+  const setPackageActive = async (pkg, isActive) => {
+    try {
+      await api(`/packages/${pkg.id}`, { method: 'PATCH', body: { is_active: isActive } })
+      message.success(isActive ? 'Đã hiển thị lại gói combo.' : 'Đã ẩn gói combo khỏi danh mục.')
+      setDetailItem(null)
+      load()
+    } catch (e) {
+      message.error(e.message || (isActive ? 'Không thể hiển thị lại gói combo.' : 'Không thể ẩn gói combo.'))
+    }
+  }
+
   // --- XỬ LÝ THÊM/SỬA GÓI COMBO ---
   const openCreatePackage = () => {
     setEditingPackage(null)
@@ -186,13 +299,28 @@ export default function Catalog() {
     setPackageModalOpen(true)
   }
 
+  const openEditPackage = (pkg) => {
+    setEditingPackage(pkg)
+    packageForm.resetFields()
+    packageForm.setFieldsValue({
+      code: pkg.code,
+      name: pkg.name,
+      description: pkg.description,
+      species_scope: pkg.species_scope,
+      services: pkg.items?.map((item) => item.service) || [],
+      ...pkg.prices,
+    })
+    setDetailItem(null)
+    setPackageModalOpen(true)
+  }
+
   const handleSavePackage = async () => {
     try {
       const values = await packageForm.validateFields()
       setPackageBusy(true)
 
       const payload = {
-        code: values.code || `GOI_${Date.now()}`,
+        code: editingPackage?.code || generatedPackageCode,
         name: values.name,
         description: values.description || '',
         species_scope: values.species_scope,
@@ -237,12 +365,6 @@ export default function Catalog() {
 
   const serviceCols = [
     {
-      title: 'Mã',
-      dataIndex: 'code',
-      width: 90,
-      render: (c) => <Text copyable style={{ fontSize: 12 }}>{c}</Text>,
-    },
-    {
       title: 'Dịch vụ',
       dataIndex: 'name',
       render: (v, r) => (
@@ -259,35 +381,17 @@ export default function Catalog() {
     {
       title: 'Thao tác',
       key: 'act',
-      width: 220,
+      width: 140,
+      align: 'center',
       render: (_, r) => (
-        <Space wrap onClick={(e) => e.stopPropagation()}>
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'service', data: r }) }}
-          >
-            Chi tiết
-          </Button>
-          {isManager && (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={(e) => { e.stopPropagation(); setEditingPrice({ kind: 'services', row: r }) }}
-            >
-              Sửa giá
-            </Button>
-          )}
-          <Button
-            type="primary"
-            size="small"
-            icon={<CalendarOutlined />}
-            onClick={(e) => { e.stopPropagation(); nav('/app/lich-hen') }}
-            style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
-          >
-            Đặt lịch
-          </Button>
-        </Space>
+        <Button
+          block
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'service', data: r }) }}
+        >
+          Chi tiết
+        </Button>
       ),
     },
   ]
@@ -323,35 +427,19 @@ export default function Catalog() {
     {
       title: 'Thao tác',
       key: 'act',
-      width: 220,
+      width: 140,
+      align: 'center',
       render: (_, r) => (
-        <Space wrap onClick={(e) => e.stopPropagation()}>
+        <div onClick={(e) => e.stopPropagation()}>
           <Button
+            block
             size="small"
             icon={<EyeOutlined />}
             onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'package', data: r }) }}
           >
             Chi tiết
           </Button>
-          {isManager && (
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={(e) => { e.stopPropagation(); setEditingPrice({ kind: 'packages', row: r }) }}
-            >
-              Sửa giá
-            </Button>
-          )}
-          <Button
-            type="primary"
-            size="small"
-            icon={<CalendarOutlined />}
-            onClick={(e) => { e.stopPropagation(); nav(`/app/lich-hen?package=${r.id}`) }}
-            style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
-          >
-            Đặt lịch
-          </Button>
-        </Space>
+        </div>
       ),
     },
   ]
@@ -365,7 +453,7 @@ export default function Catalog() {
             Danh Mục Dịch Vụ & Bảng Giá Theo Size
           </Title>
           <Text type="secondary">
-            Bảng giá minh bạch được phân tầng theo kích cỡ thú cưng (XS &lt; 3kg, S 3-7kg, M 7-15kg, L 15-25kg, XL &gt; 25kg)
+            Bảng giá phân theo cân nặng (Chó: XS &lt; 3kg, S 3-&lt;7kg, M 7-&lt;15kg, L 15-&lt;30kg, XL &gt;= 30kg; Mèo: XS &lt; 3kg, S 3-&lt;4.5kg, M 4.5-&lt;6kg, L 6-&lt;8kg, XL &gt;= 8kg)
           </Text>
         </div>
 
@@ -493,32 +581,32 @@ export default function Catalog() {
       >
         <Form form={serviceForm} layout="vertical">
           <Row gutter={16}>
-            <Col span={16}>
+            <Col span={24}>
               <Form.Item name="name" label="Tên dịch vụ" rules={[{ required: true, message: 'Nhập tên dịch vụ' }]}>
                 <Input placeholder="ví dụ: Tắm trị liệu da mẫn cảm, Cắt tỉa tạo kiểu..." />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="code" label="Mã dịch vụ" rules={[{ required: true, message: 'Nhập mã' }]}>
-                <Input placeholder="ví dụ: TAM_TRI_LIEU" />
               </Form.Item>
             </Col>
           </Row>
 
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="category" label="Nhóm phân loại" rules={[{ required: true }]}>
                 <Select options={Object.entries(CATEGORY).map(([value, label]) => ({ value, label }))} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="species_scope" label="Loài áp dụng" rules={[{ required: true }]}>
                 <Select options={Object.entries(SPECIES).map(([value, label]) => ({ value, label }))} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="duration_minutes" label="Thời lượng (phút)" rules={[{ required: true }]}>
                 <InputNumber min={5} step={5} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
+              <Form.Item name="resource_type" label="Cơ sở vật chất" rules={[{ required: true, message: 'Chọn tài nguyên cần' }]}>
+                <Select options={Object.entries(RESOURCE_TYPES).map(([value, label]) => ({ value, label }))} />
               </Form.Item>
             </Col>
           </Row>
@@ -528,11 +616,30 @@ export default function Catalog() {
           </Form.Item>
 
           <Divider orientation="left" style={{ margin: '12px 0' }}>Bảng giá theo từng kích thước (VNĐ)</Divider>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+            {serviceSpeciesScope === 'both' ? (
+              <>
+                Chó: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES.dog[size]}`).join(' · ')}
+                <br />
+                Mèo: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES.cat[size]}`).join(' · ')}
+              </>
+            ) : (
+              <>
+                {SPECIES[serviceSpeciesScope]}: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES[serviceSpeciesScope][size]}`).join(' · ')}
+              </>
+            )}
+          </Text>
           <Row gutter={12}>
             {SIZES.map((s) => (
               <Col span={4.8} key={s} style={{ flex: 1 }}>
                 <Form.Item name={s} label={`Size ${s}`}>
-                  <InputNumber style={{ width: '100%' }} step={5000} min={0} />
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    step={5000}
+                    min={0}
+                    formatter={formatPriceInput}
+                    parser={parsePriceInput}
+                  />
                 </Form.Item>
               </Col>
             ))}
@@ -555,14 +662,9 @@ export default function Catalog() {
       >
         <Form form={packageForm} layout="vertical">
           <Row gutter={16}>
-            <Col span={16}>
+            <Col span={24}>
               <Form.Item name="name" label="Tên gói combo" rules={[{ required: true, message: 'Nhập tên gói' }]}>
                 <Input placeholder="ví dụ: Gói Tắm & Cắt Tỉa Toàn Diện, Gói Spa Dưỡng Phục Hồi..." />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="code" label="Mã gói" rules={[{ required: true, message: 'Nhập mã gói' }]}>
-                <Input placeholder="ví dụ: COMBO_TOAN_DIEN" />
               </Form.Item>
             </Col>
           </Row>
@@ -596,11 +698,28 @@ export default function Catalog() {
           </Form.Item>
 
           <Divider orientation="left" style={{ margin: '12px 0' }}>Bảng giá trọn gói combo theo size (VNĐ)</Divider>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
+            {packageSpeciesScope === 'both' ? (
+              <>
+                Chó: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES.dog[size]}`).join(' · ')}
+                <br />
+                Mèo: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES.cat[size]}`).join(' · ')}
+              </>
+            ) : (
+              <>{SPECIES[packageSpeciesScope]}: {SIZES.map((size) => `${size} ${SIZE_WEIGHT_RANGES[packageSpeciesScope][size]}`).join(' · ')}</>
+            )}
+          </Text>
           <Row gutter={12}>
             {SIZES.map((s) => (
               <Col span={4.8} key={s} style={{ flex: 1 }}>
                 <Form.Item name={s} label={`Size ${s}`}>
-                  <InputNumber style={{ width: '100%' }} step={10000} min={0} />
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    step={10000}
+                    min={0}
+                    formatter={formatPriceInput}
+                    parser={parsePriceInput}
+                  />
                 </Form.Item>
               </Col>
             ))}
@@ -617,11 +736,13 @@ export default function Catalog() {
               <Typography.Text strong style={{ fontSize: 16 }}>
                 {detailItem?.type === 'package' ? 'Chi tiết gói combo' : 'Chi tiết dịch vụ spa'}: {detailItem?.data?.name}
               </Typography.Text>
-              <div>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  Mã: {detailItem?.data?.code}
-                </Typography.Text>
-              </div>
+              {detailItem?.type === 'package' && (
+                <div>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Mã: {detailItem.data.code}
+                  </Typography.Text>
+                </div>
+              )}
             </div>
           </div>
         }
@@ -630,30 +751,57 @@ export default function Catalog() {
         width={560}
         extra={
           <Space>
+            {isManager && detailItem?.type === 'service' && detailItem.data.is_active && (
+              <Popconfirm
+                title="Ẩn dịch vụ này khỏi danh mục?"
+                description="Dịch vụ sẽ không còn dùng để đặt lịch mới; lịch sử cũ vẫn được giữ."
+                okText="Ẩn dịch vụ"
+                cancelText="Hủy"
+                onConfirm={() => deleteService(detailItem.data)}
+              >
+                <Button danger icon={<DeleteOutlined />}>Ẩn dịch vụ</Button>
+              </Popconfirm>
+            )}
+            {isManager && detailItem?.type === 'service' && !detailItem.data.is_active && (
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                onClick={() => restoreService(detailItem.data)}
+              >
+                Hiện lại dịch vụ
+              </Button>
+            )}
+            {isManager && detailItem?.type === 'package' && detailItem.data.is_active && (
+              <Popconfirm
+                title="Ẩn gói combo này khỏi danh mục?"
+                description="Gói sẽ không còn được chọn cho đặt lịch mới; lịch sử cũ vẫn được giữ."
+                okText="Ẩn gói"
+                cancelText="Hủy"
+                onConfirm={() => setPackageActive(detailItem.data, false)}
+              >
+                <Button danger icon={<DeleteOutlined />}>Ẩn gói</Button>
+              </Popconfirm>
+            )}
+            {isManager && detailItem?.type === 'package' && !detailItem.data.is_active && (
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                onClick={() => setPackageActive(detailItem.data, true)}
+              >
+                Hiện lại gói
+              </Button>
+            )}
             {isManager && (
               <Button
                 icon={<EditOutlined />}
                 onClick={() => {
-                  const it = detailItem
-                  setDetailItem(null)
-                  setEditingPrice({ kind: it.type === 'package' ? 'packages' : 'services', row: it.data })
+                  if (detailItem.type === 'package') openEditPackage(detailItem.data)
+                  else openEditService(detailItem.data)
                 }}
               >
-                Sửa bảng giá
+                {detailItem?.type === 'package' ? 'Sửa thành phần' : 'Sửa dịch vụ'}
               </Button>
             )}
-            <Button
-              type="primary"
-              icon={<CalendarOutlined />}
-              onClick={() => {
-                const it = detailItem
-                setDetailItem(null)
-                nav(it.type === 'package' ? `/app/lich-hen?package=${it.data.id}` : '/app/lich-hen')
-              }}
-              style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
-            >
-              Đặt lịch ngay
-            </Button>
           </Space>
         }
       >
@@ -663,7 +811,9 @@ export default function Catalog() {
               <Descriptions.Item label="Tên dịch vụ/gói" span={2}>
                 <strong style={{ fontSize: 16, color: '#0f8b8d' }}>{detailItem.data.name}</strong>
               </Descriptions.Item>
-              <Descriptions.Item label="Mã dịch vụ">{detailItem.data.code}</Descriptions.Item>
+              {detailItem.type === 'package' && (
+                <Descriptions.Item label="Mã gói">{detailItem.data.code}</Descriptions.Item>
+              )}
               <Descriptions.Item label="Loài áp dụng">
                 <Tag color="purple">{SPECIES[detailItem.data.species_scope] || detailItem.data.species_scope}</Tag>
               </Descriptions.Item>
