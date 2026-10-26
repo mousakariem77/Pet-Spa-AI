@@ -585,7 +585,13 @@ def convert_walk_in(ticket, user, staff_id=None, assignments=None):
         if first_svc:
             svc_ids = [first_svc.pk]
 
+    spa = Spa.get()
     start_at = timezone.now()
+    if spa:
+        local_now = timezone.localtime(start_at)
+        if local_now.time() > spa.close_time or local_now.time() < spa.open_time:
+            mid_hour = (spa.open_time.hour + spa.close_time.hour) // 2
+            start_at = local_now.replace(hour=mid_hour, minute=0, second=0, microsecond=0)
 
     # 4. Tạo Booking
     booking = create_booking(
