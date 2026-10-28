@@ -1467,10 +1467,22 @@ export default function Home() {
           >
             {myTechBookings.length > 0 ? (
               <Table
-                columns={feedColumns.filter((col) => col.key !== 'actions')}
+                columns={feedColumns
+                  .filter((col) => !['actions', 'staff', 'payment'].includes(col.key))
+                  .map((col) => ({
+                    ...col,
+                    width: {
+                      time: 120,
+                      pet: 280,
+                      client: 190,
+                      status: 135,
+                    }[col.key] || col.width,
+                  }))}
                 dataSource={myTechBookings}
                 rowKey="id"
                 pagination={false}
+                tableLayout="fixed"
+                className="technician-dashboard-bookings"
               />
             ) : (
               <Empty description="Hôm nay bạn chưa có lịch chăm sóc nào được chỉ định." />

@@ -137,8 +137,13 @@ export default function Catalog() {
   const [loading, setLoading] = useState(true)
   const [servicePage, setServicePage] = useState(1)
   const [servicePageSize, setServicePageSize] = useState(10)
+  const [serviceSearch, setServiceSearch] = useState('')
+  const [serviceCategoryFilter, setServiceCategoryFilter] = useState('')
+  const [serviceSpeciesFilter, setServiceSpeciesFilter] = useState('')
   const [packagePage, setPackagePage] = useState(1)
   const [packagePageSize, setPackagePageSize] = useState(10)
+  const [packageSearch, setPackageSearch] = useState('')
+  const [packageSpeciesFilter, setPackageSpeciesFilter] = useState('')
 
   // Sửa giá
   const [editingPrice, setEditingPrice] = useState(null)
@@ -161,6 +166,23 @@ export default function Catalog() {
   const packageName = Form.useWatch('name', packageForm)
   const packageSpeciesScope = Form.useWatch('species_scope', packageForm) || 'both'
   const generatedPackageCode = generatePackageCode(packageName, packages)
+
+  const normalizedServiceSearch = serviceSearch.trim().toLocaleLowerCase('vi')
+  const filteredServices = services.filter((service) => {
+    const matchesSearch = !normalizedServiceSearch
+      || `${service.name} ${service.description || ''}`.toLocaleLowerCase('vi').includes(normalizedServiceSearch)
+    return matchesSearch
+      && (!serviceCategoryFilter || service.category === serviceCategoryFilter)
+      && (!serviceSpeciesFilter || service.species_scope === serviceSpeciesFilter || service.species_scope === 'both')
+  })
+
+  const normalizedPackageSearch = packageSearch.trim().toLocaleLowerCase('vi')
+  const filteredPackages = packages.filter((pkg) => {
+    const matchesSearch = !normalizedPackageSearch
+      || `${pkg.name} ${pkg.description || ''}`.toLocaleLowerCase('vi').includes(normalizedPackageSearch)
+    return matchesSearch
+      && (!packageSpeciesFilter || pkg.species_scope === packageSpeciesFilter || pkg.species_scope === 'both')
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -398,12 +420,6 @@ export default function Catalog() {
 
   const packageCols = [
     {
-      title: 'Mã',
-      dataIndex: 'code',
-      width: 90,
-      render: (c) => <Text copyable style={{ fontSize: 12 }}>{c}</Text>,
-    },
-    {
       title: 'Gói combo',
       dataIndex: 'name',
       render: (v, r) => (
@@ -495,14 +511,41 @@ export default function Catalog() {
               label: `Dịch vụ lẻ (${services.length})`,
               children: (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 13 }}>💡 Bấm vào bất kỳ dòng nào để xem chi tiết bảng giá size</Text>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <Space wrap size={8}>
+                      <Input.Search
+                        allowClear
+                        value={serviceSearch}
+                        onChange={(event) => { setServiceSearch(event.target.value); setServicePage(1) }}
+                        placeholder="Tìm tên hoặc mô tả dịch vụ"
+                        style={{ width: 260 }}
+                      />
+                      <Select
+                        value={serviceCategoryFilter}
+                        onChange={(value) => { setServiceCategoryFilter(value); setServicePage(1) }}
+                        options={[
+                          { value: '', label: 'Tất cả nhóm' },
+                          ...Object.entries(CATEGORY).map(([value, label]) => ({ value, label })),
+                        ]}
+                        style={{ width: 145 }}
+                      />
+                      <Select
+                        value={serviceSpeciesFilter}
+                        onChange={(value) => { setServiceSpeciesFilter(value); setServicePage(1) }}
+                        options={[
+                          { value: '', label: 'Tất cả loài' },
+                          ...Object.entries(SPECIES).map(([value, label]) => ({ value, label })),
+                        ]}
+                        style={{ width: 145 }}
+                      />
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem bảng giá size</Text>
                     <RowPerPageSelect value={servicePageSize} onChange={(ps) => { setServicePageSize(ps); setServicePage(1); }} />
                   </div>
                   <Table
                     rowKey="id"
                     loading={loading}
-                    dataSource={services}
+                    dataSource={filteredServices}
                     columns={serviceCols}
                     scroll={{ x: 'max-content' }}
                     rowClassName={() => 'clickable-row'}
@@ -527,14 +570,32 @@ export default function Catalog() {
               label: `Gói combo trọn gói (${packages.length})`,
               children: (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 13 }}>💡 Bấm vào bất kỳ dòng nào để xem chi tiết gói combo</Text>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                    <Space wrap size={8}>
+                      <Input.Search
+                        allowClear
+                        value={packageSearch}
+                        onChange={(event) => { setPackageSearch(event.target.value); setPackagePage(1) }}
+                        placeholder="Tìm tên hoặc mô tả gói"
+                        style={{ width: 260 }}
+                      />
+                      <Select
+                        value={packageSpeciesFilter}
+                        onChange={(value) => { setPackageSpeciesFilter(value); setPackagePage(1) }}
+                        options={[
+                          { value: '', label: 'Tất cả loài' },
+                          ...Object.entries(SPECIES).map(([value, label]) => ({ value, label })),
+                        ]}
+                        style={{ width: 145 }}
+                      />
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem chi tiết gói</Text>
                     <RowPerPageSelect value={packagePageSize} onChange={(ps) => { setPackagePageSize(ps); setPackagePage(1); }} />
                   </div>
                   <Table
                     rowKey="id"
                     loading={loading}
-                    dataSource={packages}
+                    dataSource={filteredPackages}
                     columns={packageCols}
                     scroll={{ x: 'max-content' }}
                     rowClassName={() => 'clickable-row'}
