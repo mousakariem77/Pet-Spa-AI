@@ -26,6 +26,11 @@ import Logo from '../components/Logo.jsx'
 const { Title, Paragraph, Text } = Typography
 
 const DAYS_VN = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ nhật']
+const SIZE_LABELS = ['XS', 'S', 'M', 'L', 'XL']
+const SIZE_WEIGHT_RANGES = {
+  dog: { XS: '<3 kg', S: '3–<7 kg', M: '7–<15 kg', L: '15–<30 kg', XL: '≥30 kg' },
+  cat: { XS: '<3 kg', S: '3–<4.5 kg', M: '4.5–<6 kg', L: '6–<8 kg', XL: '≥8 kg' },
+}
 
 export default function LandingPage() {
   const { user } = useAuth()
@@ -284,6 +289,22 @@ export default function LandingPage() {
             </Paragraph>
           </div>
 
+          <div className="size-weight-guide">
+            <Text strong className="size-weight-guide-title">Khoảng cân nặng theo size</Text>
+            <div className="size-weight-guide-row size-weight-guide-heading">
+              <span />
+              {SIZE_LABELS.map((size) => <span key={size}>{size}</span>)}
+            </div>
+            {['dog', 'cat'].map((species) => (
+              <div className="size-weight-guide-row" key={species}>
+                <span className="size-weight-guide-species">{species === 'dog' ? 'Chó' : 'Mèo'}</span>
+                {SIZE_LABELS.map((size) => (
+                  <span key={size}>{SIZE_WEIGHT_RANGES[species][size]}</span>
+                ))}
+              </div>
+            ))}
+          </div>
+
           {loading ? (
             <div style={{ textAlign: 'center', padding: '60px 0' }}><Spin size="large" /></div>
           ) : packages.length === 0 ? (
@@ -308,7 +329,6 @@ export default function LandingPage() {
                       <div className="price-tag-box">
                         <Text type="secondary" style={{ fontSize: 13 }}>Giá chỉ từ</Text>
                         <div className="price-val">{money(minPrice)}</div>
-                        <Text type="secondary" style={{ fontSize: 12 }}>Tùy size XS - XL</Text>
                       </div>
 
                       <Divider style={{ margin: '16px 0' }} />

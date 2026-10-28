@@ -15,6 +15,7 @@ from accounts.permissions import IsFrontDesk
 from billing.models import Invoice
 from catalog.models import Package, Service
 from customers.models import Client, Pet
+from customers.serializers import VaccinationSerializer
 
 from . import services
 from .models import (
@@ -65,7 +66,8 @@ class BookingSerializer(serializers.ModelSerializer):
     def get_pet_info(self, b):
         p = b.pet
         info = {'id': p.pk, 'name': p.name, 'species': p.species, 'breed': p.breed, 'size_class': p.size_class,
-                'coat_type': p.coat_type, 'allergy_note': p.allergy_note,
+            'coat_type': p.coat_type, 'allergy_note': p.allergy_note,
+            'vaccinations': VaccinationSerializer(p.vaccinations.all(), many=True).data,
                 'health_tags': [t.name_vi for t in p.health_tags.all()]}
         if self._is_staff():
             info['safety_note'] = p.safety_note
@@ -145,7 +147,7 @@ class BookingViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
         u = self.request.user
         qs = Booking.objects.select_related(
             'client', 'pet', 'package', 'staff__user', 'invoice').prefetch_related(
-            'items__service', 'items__resource', 'pet__health_tags', 'logs')
+            'items__service', 'items__resource', 'pet__health_tags', 'pet__vaccinations', 'logs')
         if u.role == Role.CUSTOMER:
             qs = qs.filter(client__user=u)
         elif u.role == Role.TECHNICIAN:
@@ -342,7 +344,7 @@ class DashboardView(APIView):
         feed_qs = today.select_related(
             'client', 'pet', 'package', 'staff__user', 'invoice'
         ).prefetch_related(
-            'items__service', 'items__resource', 'pet__health_tags'
+            'items__service', 'items__resource', 'pet__health_tags', 'pet__vaccinations'
         ).order_by('start_at')
         feed = BookingSerializer(feed_qs, many=True, context={'request': request}).data
 

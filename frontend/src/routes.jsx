@@ -20,7 +20,7 @@ export const APP_ROUTES = [
   { path: '/app/bang-le-tan', label: 'Bảng lễ tân (Điều phối)', element: <ReceptionDesk />, roles: ['receptionist', 'manager'] },
   { path: '/app/hang-doi-walk-in', label: 'Hàng đợi vãng lai', element: <WalkInQueue />, roles: ['receptionist', 'manager'] },
   { path: '/app/thong-ke', label: 'Thống kê hoạt động', element: <Analytics />, roles: ['receptionist', 'manager'] },
-  { path: '/app/lich-hen', label: 'Lịch hẹn', element: <Bookings />, roles: null, public: true },
+  { path: '/app/lich-hen', label: 'Lịch hẹn', element: <Bookings />, roles: null },
   { path: '/app/hoa-don', label: 'Hóa đơn & Thu ngân', element: <Invoices />, roles: ['customer', 'receptionist', 'manager'] },
   { path: '/app/nhac-tai-spa', label: 'Nhắc tái spa (AI)', element: <RebookReminders />, roles: ['customer', 'receptionist', 'manager'] },
   // Nhân viên quản lý thú cưng trong trang Khách hàng; route này chỉ còn hiện ở menu của khách (nhân viên được chuyển hướng)

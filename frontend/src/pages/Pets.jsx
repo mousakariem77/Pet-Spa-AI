@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, App, Button, Card, Descriptions, Drawer, Dropdown, Input, Modal,
+  Alert, App, Button, Card, Descriptions, Drawer, Dropdown, Input,
   Select, Space, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
-  CalendarOutlined, DeleteOutlined, EditOutlined, ExclamationCircleOutlined,
+  CalendarOutlined, EditOutlined,
   EyeOutlined, MedicineBoxOutlined, MoreOutlined, PlusOutlined,
   ReloadOutlined, RobotOutlined, UserOutlined,
 } from '@ant-design/icons'
@@ -18,7 +18,7 @@ import PetFormModal, { COAT, SEX, SPECIES } from '../components/PetFormModal.jsx
 import VaccinationModal from '../components/VaccinationModal.jsx'
 import PetAvatar from '../components/PetAvatar.jsx'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Text } = Typography
 
 function age(months) {
   if (months == null) return '—'
@@ -96,38 +96,6 @@ export default function Pets() {
     return <Navigate to={`/app/khach-hang${params.get('q') ? `?q=${encodeURIComponent(params.get('q'))}` : ''}`} replace />
   }
 
-  const hide = async (id) => {
-    try {
-      await api(`/pets/${id}`, { method: 'DELETE' })
-      message.success('Đã ẩn hồ sơ bé cưng thành công!')
-      load()
-    } catch (e) {
-      message.error(e.message || 'Lỗi khi ẩn hồ sơ')
-    }
-  }
-
-  const confirmHidePet = (pet) => {
-    Modal.confirm({
-      title: 'Ẩn hồ sơ thú cưng?',
-      icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-      content: (
-        <div>
-          <Paragraph style={{ marginBottom: 8 }}>
-            Bạn có chắc chắn muốn ẩn hồ sơ bé <b>"{pet.name}"</b> ({SPECIES[pet.species] || pet.species}) không?
-          </Paragraph>
-          <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
-            Hồ sơ thú cưng sẽ được ẩn khỏi danh sách của bạn nhưng dữ liệu lịch sử các hóa đơn và cuộc hẹn trước đây vẫn được lưu trữ an toàn.
-          </Paragraph>
-        </div>
-      ),
-      okText: 'Ẩn hồ sơ',
-      okType: 'danger',
-      cancelText: 'Hủy',
-      centered: true,
-      onOk: () => hide(pet.id),
-    })
-  }
-
   const tagMap = Object.fromEntries(tags.map((t) => [t.id, t]))
 
   const columns = [
@@ -139,6 +107,7 @@ export default function Pets() {
           <PetAvatar species={r.species} size={40} style={{ border: '2px solid #e2e8f0' }} />
           <div>
             <div style={{ color: '#0b3d3f', fontSize: 14, fontWeight: 700 }}>{r.name}</div>
+            {!r.is_active && <Tag color="default" style={{ margin: '3px 0 0', fontSize: 11 }}>Đã ẩn</Tag>}
             <div style={{ fontSize: 12, color: '#64748b' }}>
               {SEX[r.sex] || r.sex} · {COAT[r.coat_type] || r.coat_type}
             </div>
@@ -254,77 +223,58 @@ export default function Pets() {
     {
       title: 'Thao tác',
       key: 'actions',
-      width: 175,
+      width: 220,
       render: (_, r) => {
         const moreItems = [
           {
             key: 'detail',
-            label: 'Xem chi tiết bé cưng',
-            icon: <EyeOutlined style={{ color: '#0f8b8d' }} />,
+            label: 'Chi tiết thú cưng',
+            icon: <EyeOutlined />,
             onClick: () => setDetailPet(r),
-          },
-          {
-            key: 'ai-package',
-            label: 'AI gợi ý gói phù hợp',
-            icon: <RobotOutlined style={{ color: '#0f8b8d' }} />,
-            onClick: () => setAiPet(r),
           },
           {
             key: 'vaccination',
             label: 'Sổ tiêm phòng',
-            icon: <MedicineBoxOutlined style={{ color: '#0f8b8d' }} />,
+            icon: <MedicineBoxOutlined />,
             onClick: () => setVaccPet(r),
           },
           {
-            type: 'divider',
-          },
-          {
-            key: 'delete',
-            label: 'Ẩn hồ sơ thú cưng',
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: () => confirmHidePet(r),
+            key: 'ai-package',
+            label: 'AI gợi ý gói phù hợp',
+            icon: <RobotOutlined />,
+            onClick: () => setAiPet(r),
           },
         ]
 
         return (
-          <Space size={6} onClick={(e) => e.stopPropagation()}>
-            <Button
-              size="small"
-              type="primary"
-              icon={<CalendarOutlined />}
-              onClick={(e) => {
-                e.stopPropagation()
-                nav(`/app/lich-hen?pet=${r.id}`)
-              }}
-              style={{ background: '#0f8b8d', borderColor: '#0f8b8d', borderRadius: 6, fontWeight: 600 }}
-            >
-              Đặt lịch
-            </Button>
-            <Button
-              size="small"
-              icon={<EditOutlined />}
-              onClick={(e) => {
-                e.stopPropagation()
-                setEditing(r)
-              }}
-              style={{ borderRadius: 6 }}
-            >
-              Sửa
-            </Button>
-            <span onClick={(e) => e.stopPropagation()}>
-              <Dropdown
-                menu={{ items: moreItems }}
-                trigger={['click']}
-                placement="bottomRight"
-              >
+          <Space size={6} className="pet-row-actions" onClick={(e) => e.stopPropagation()}>
+            {r.is_active && (
+              <Tooltip title="Đặt lịch">
                 <Button
                   size="small"
-                  icon={<MoreOutlined />}
-                  style={{ borderRadius: 6, padding: '0 8px' }}
-                />
-              </Dropdown>
-            </span>
+                  type="primary"
+                  icon={<CalendarOutlined />}
+                  aria-label="Đặt lịch"
+                  onClick={() => nav(`/app/lich-hen?pet=${r.id}`)}
+                  className="pet-row-action-book"
+                >
+                  Đặt lịch
+                </Button>
+              </Tooltip>
+            )}
+            {r.is_active && (
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => setEditing(r)}
+                className="pet-row-action"
+              >
+                Sửa
+              </Button>
+            )}
+            <Dropdown menu={{ items: moreItems }} trigger={['click']} placement="bottomRight">
+              <Button size="small" icon={<MoreOutlined />} aria-label="Thao tác khác" className="pet-row-action" />
+            </Dropdown>
           </Space>
         )
       },

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, App, Card, Col, DatePicker, Form, Input, InputNumber, Modal,
+  Alert, App, Button, Col, DatePicker, Form, Input, InputNumber, Modal,
   Row, Select, Space, Tag, Typography,
 } from 'antd'
+import { DeleteOutlined, MedicineBoxOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { api, toFormErrors, unwrap } from '../api.js'
 import PetAvatar from './PetAvatar.jsx'
+import VaccinationModal from './VaccinationModal.jsx'
 
 const { Text } = Typography
 
@@ -114,6 +116,7 @@ export default function PetFormModal({ pet, clientId, clientName, isCustomer, on
   const [searchBreedText, setSearchBreedText] = useState('')
   const [tags, setTags] = useState([])
   const [busy, setBusy] = useState(false)
+  const [vaccinationPet, setVaccinationPet] = useState(null)
 
   // Loài đang chọn hiện tại (ưu tiên form watch, fallback theo dữ liệu pet hoặc mặc định 'dog')
   const activeSpecies = watchedSpecies || pet?.species || 'dog'
@@ -199,8 +202,10 @@ export default function PetFormModal({ pet, clientId, clientName, isCustomer, on
 
   const save = async () => {
     const v = await form.validateFields()
+    const vaccinations = (v.vaccinations || []).filter((item) => item?.vaccine_name?.trim())
+    const { vaccinations: _vaccinations, ...petValues } = v
     const body = {
-      ...v,
+      ...petValues,
       name: v.name?.trim(),
       breed: v.breed?.trim() || '',
       allergy_note: v.allergy_note?.trim() || 'Không',
@@ -209,14 +214,34 @@ export default function PetFormModal({ pet, clientId, clientName, isCustomer, on
     }
     if (isCustomer) delete body.client
     else body.client = pet?.client || clientId
+    let createdPet = false
     setBusy(true)
     try {
       if (pet?.id) await api(`/pets/${pet.id}`, { method: 'PATCH', body })
-      else await api('/pets', { method: 'POST', body })
+      else {
+        const newPet = await api('/pets', { method: 'POST', body })
+        createdPet = true
+        for (const vaccination of vaccinations) {
+          await api(`/pets/${newPet.id}/vaccinations`, {
+            method: 'POST',
+            body: {
+              vaccine_name: vaccination.vaccine_name.trim(),
+              date_given: dayjs(vaccination.date_given).format('YYYY-MM-DD'),
+              valid_until: vaccination.valid_until ? dayjs(vaccination.valid_until).format('YYYY-MM-DD') : null,
+            },
+          })
+        }
+      }
       message.success(pet?.id ? 'Đã cập nhật hồ sơ thú.' : `Đã thêm bé ${body.name}.`)
       onSaved?.()
       onClose()
     } catch (e) {
+      if (createdPet) {
+        message.warning('Đã tạo hồ sơ thú cưng nhưng chưa lưu được thông tin tiêm phòng. Hãy thêm mũi tiêm trong hồ sơ thú cưng.')
+        onSaved?.()
+        onClose()
+        return
+      }
       form.setFields(toFormErrors(e))
       if (!e.fields || !Object.keys(e.fields).length) message.error(e.message)
     } finally {
@@ -336,8 +361,113 @@ export default function PetFormModal({ pet, clientId, clientName, isCustomer, on
         <Form.Item name="allergy_note" label='Dị ứng (ghi "Không" nếu không có)' rules={[{ required: true, whitespace: true, message: 'Bắt buộc ghi dị ứng' }]}>
           <Input.TextArea rows={2} />
         </Form.Item>
+        {pet?.id && (
+          <section className="pet-create-vaccination">
+            <div className="pet-create-vaccination-heading">
+              <div>
+                <Text strong>Lịch sử tiêm phòng</Text>
+                <Text type="secondary">{pet.vaccinations?.length || 0} mũi tiêm đã ghi nhận</Text>
+              </div>
+              <Button icon={<MedicineBoxOutlined />} onClick={() => setVaccinationPet(pet)}>
+                Quản lý tiêm phòng
+              </Button>
+            </div>
+          </section>
+        )}
+        {!pet?.id && (
+          <section className="pet-create-vaccination">
+            <div className="pet-create-vaccination-heading">
+              <div>
+                <Text strong>Lịch sử tiêm phòng</Text>
+                <Text type="secondary">Ghi nhận mũi tiêm đã có của bé</Text>
+              </div>
+              <Tag color="cyan">Tùy chọn</Tag>
+            </div>
+            <Form.List name="vaccinations" initialValue={[{}]}>
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map((field, index) => (
+                    <Row gutter={12} align="top" key={field.key}>
+                      <Col span={8}>
+                        <Form.Item
+                          name={[field.name, 'vaccine_name']}
+                          label={index === 0 ? 'Tên vaccine' : `Vaccine ${index + 1}`}
+                          dependencies={[[ 'vaccinations', field.name, 'date_given' ], [ 'vaccinations', field.name, 'valid_until' ]]}
+                          rules={[({ getFieldValue }) => ({
+                            validator(_, value) {
+                              const row = getFieldValue(['vaccinations', field.name]) || {}
+                              if (!value?.trim() && (row.date_given || row.valid_until)) {
+                                return Promise.reject(new Error('Nhập tên vaccine'))
+                              }
+                              return Promise.resolve()
+                            },
+                          })]}
+                        >
+                          <Input placeholder="Ví dụ: Vaccine dại" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={7}>
+                        <Form.Item
+                          name={[field.name, 'date_given']}
+                          label={index === 0 ? 'Ngày tiêm' : 'Ngày tiêm'}
+                          dependencies={[[ 'vaccinations', field.name, 'vaccine_name' ]]}
+                          rules={[({ getFieldValue }) => ({
+                            validator(_, value) {
+                              const row = getFieldValue(['vaccinations', field.name]) || {}
+                              if (row.vaccine_name?.trim() && !value) {
+                                return Promise.reject(new Error('Chọn ngày tiêm'))
+                              }
+                              if (value && value.isAfter(dayjs(), 'day')) {
+                                return Promise.reject(new Error('Ngày tiêm không được ở tương lai'))
+                              }
+                              return Promise.resolve()
+                            },
+                          })]}
+                        >
+                          <DatePicker format="DD/MM/YYYY" disabledDate={(date) => date.isAfter(dayjs(), 'day')} style={{ width: '100%' }} placeholder="Chọn ngày" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={7}>
+                        <Form.Item
+                          name={[field.name, 'valid_until']}
+                          label="Hiệu lực đến"
+                          dependencies={[[ 'vaccinations', field.name, 'date_given' ]]}
+                          rules={[({ getFieldValue }) => ({
+                            validator(_, value) {
+                              const dateGiven = getFieldValue(['vaccinations', field.name, 'date_given'])
+                              if (value && dateGiven && value.isBefore(dateGiven, 'day')) {
+                                return Promise.reject(new Error('Hạn hiệu lực phải sau ngày tiêm'))
+                              }
+                              return Promise.resolve()
+                            },
+                          })]}
+                        >
+                          <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Không bắt buộc" />
+                        </Form.Item>
+                      </Col>
+                      <Col span={2}>
+                        <Form.Item label={index === 0 ? ' ' : undefined}>
+                          <Button danger icon={<DeleteOutlined />} aria-label={`Xóa vaccine ${index + 1}`} onClick={() => remove(field.name)} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  ))}
+                  <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                    Thêm mũi tiêm
+                  </Button>
+                </>
+              )}
+            </Form.List>
+          </section>
+        )}
         {!isCustomer && <Form.Item name="safety_note" label="Ghi chú an toàn nội bộ"><Input.TextArea rows={2} /></Form.Item>}
       </Form>
+      <VaccinationModal
+        pet={vaccinationPet}
+        canEdit
+        onClose={() => setVaccinationPet(null)}
+        onChanged={() => onSaved?.()}
+      />
     </Modal>
   )
 }

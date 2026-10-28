@@ -1,13 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Alert, Badge, Button, Calendar, Card, Col, DatePicker, Descriptions, Drawer, Empty,
+  Alert, Badge, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty,
   Form, Input, Modal, Radio, Row, Segmented, Select, Space, Spin, Table, Tag, Timeline,
-  Typography, message,
+  Statistic, Typography, message,
 } from 'antd'
 import {
   CalendarOutlined, CheckCircleOutlined, ClockCircleOutlined,
-  CloseCircleOutlined, DesktopOutlined, DollarOutlined, EditOutlined, PlayCircleOutlined,
-  PlusOutlined, ReloadOutlined, RobotOutlined, TableOutlined, UserOutlined, WarningOutlined,
+  CloseCircleOutlined, DesktopOutlined, DollarOutlined, EditOutlined, EyeOutlined, PlayCircleOutlined,
+  LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined, TableOutlined, UserOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -18,6 +18,11 @@ import RowPerPageSelect from '../components/RowPerPageSelect.jsx'
 import PetAvatar from '../components/PetAvatar.jsx'
 
 const { Title, Text, Paragraph } = Typography
+const WEEKDAYS = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ nhật']
+const weekStartFor = (date) => date.startOf('day').subtract((date.day() + 6) % 7, 'day')
+const WEEK_GRID_START_HOUR = 7
+const WEEK_GRID_END_HOUR = 22
+const WEEK_GRID_HOUR_HEIGHT = 54
 
 export const STATUS_MAP = {
   pending: { label: 'Chờ duyệt', color: 'gold' },
@@ -38,14 +43,17 @@ export default function Bookings() {
 
   const [bookings, setBookings] = useState([])
   const [loading, setLoading] = useState(false)
+  const [spaHours, setSpaHours] = useState(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
-  const [selectedDate, setSelectedDate] = useState(dayjs())
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [bookingSearchInput, setBookingSearchInput] = useState('')
+  const [bookingSearch, setBookingSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [detailBooking, setDetailBooking] = useState(null)
   const [detailOpen, setDetailOpen] = useState(false)
-  const [viewMode, setViewMode] = useState('table') // 'table' | 'calendar'
-  const [calendarMonth, setCalendarMonth] = useState(dayjs())
+  const [viewMode, setViewMode] = useState('table') // 'table' | 'week'
+  const [calendarWeekStart, setCalendarWeekStart] = useState(() => weekStartFor(dayjs()))
 
   // Dữ liệu hỗ trợ tạo lịch
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -82,26 +90,138 @@ export default function Bookings() {
   const [selectedStaffId, setSelectedStaffId] = useState(null)
 
   const [form] = Form.useForm()
+  const weekFocusDate = selectedDate || dayjs()
+  const visibleBookings = statusFilter
+    ? bookings.filter((booking) => booking.status === statusFilter)
+    : bookings
+  const bookingStats = [
+    { key: 'total', label: 'Tổng lịch', value: bookings.length, tone: 'teal' },
+    { key: 'pending', label: 'Chờ duyệt', value: bookings.filter((booking) => booking.status === 'pending').length, tone: 'amber' },
+    { key: 'confirmed', label: 'Đã xác nhận', value: bookings.filter((booking) => booking.status === 'confirmed').length, tone: 'blue' },
+    { key: 'active', label: 'Đang phục vụ', value: bookings.filter((booking) => ['checked_in', 'in_progress'].includes(booking.status)).length, tone: 'cyan' },
+    { key: 'completed', label: 'Hoàn tất', value: bookings.filter((booking) => booking.status === 'completed').length, tone: 'green' },
+    { key: 'cancelled', label: 'Đã hủy', value: bookings.filter((booking) => booking.status === 'cancelled').length, tone: 'slate' },
+  ]
+  const selectedPetId = Form.useWatch('pet', form)
+  const selectedEditPetId = Form.useWatch('pet', editForm)
+  const availablePets = isCustomer ? myPets : allPets
+  const selectedPet = availablePets.find((pet) => pet.id === selectedPetId)
+  const selectedEditPet = availablePets.find((pet) => pet.id === selectedEditPetId)
+  const packagesForSelectedPet = selectedPet
+    ? packages.filter((pkg) => pkg.species_scope === 'both' || pkg.species_scope === selectedPet.species)
+    : []
+  const packagesForEditedPet = selectedEditPet
+    ? packages.filter((pkg) => pkg.species_scope === 'both' || pkg.species_scope === selectedEditPet.species)
+    : []
+  const servicesForSelectedPet = selectedPet
+    ? services.filter((service) => service.species_scope === 'both' || service.species_scope === selectedPet.species)
+    : []
+  const servicesForEditedPet = selectedEditPet
+    ? services.filter((service) => service.species_scope === 'both' || service.species_scope === selectedEditPet.species)
+    : []
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const nextSearch = bookingSearchInput.trim()
+      if (nextSearch !== bookingSearch) {
+        setBookingSearch(nextSearch)
+        setPage(1)
+      }
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [bookingSearchInput, bookingSearch])
+
+  useEffect(() => {
+    let active = true
+    api('/spa')
+      .then((spa) => { if (active) setSpaHours(spa) })
+      .catch(() => { if (active) setSpaHours(null) })
+    return () => { active = false }
+  }, [])
+
+  const weekdays = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ nhật']
+  const openingDays = Array.isArray(spaHours?.open_weekdays)
+    ? spaHours.open_weekdays.map((day) => weekdays[day]).filter(Boolean).join(', ')
+    : ''
+  const openingHours = spaHours?.open_time && spaHours?.close_time
+    ? `${spaHours.open_time.slice(0, 5)} - ${spaHours.close_time.slice(0, 5)}`
+    : ''
+
+  useEffect(() => {
+    if (!selectedPet || !packages.length) return
+    const selectedPackage = packages.find((pkg) => pkg.id === form.getFieldValue('package'))
+    if (selectedPackage && selectedPackage.species_scope !== 'both' && selectedPackage.species_scope !== selectedPet.species) {
+      form.setFieldValue('package', undefined)
+      setQuoteData(null)
+    }
+  }, [selectedPet, packages, form])
+
+  useEffect(() => {
+    if (!selectedEditPet || !packages.length) return
+    const selectedPackage = packages.find((pkg) => pkg.id === editForm.getFieldValue('package'))
+    if (selectedPackage && selectedPackage.species_scope !== 'both' && selectedPackage.species_scope !== selectedEditPet.species) {
+      editForm.setFieldValue('package', undefined)
+      setEditQuoteData(null)
+    }
+  }, [selectedEditPet, packages, editForm])
+
+  useEffect(() => {
+    if (!selectedPet || !services.length) return
+    const selectedIds = form.getFieldValue('services') || []
+    const allowedIds = new Set(servicesForSelectedPet.map((service) => service.id))
+    const compatibleIds = selectedIds.filter((id) => allowedIds.has(id))
+    if (compatibleIds.length !== selectedIds.length) {
+      form.setFieldValue('services', compatibleIds)
+      setQuoteData(null)
+    }
+  }, [selectedPet, services, servicesForSelectedPet, form])
+
+  useEffect(() => {
+    if (!selectedEditPet || !services.length) return
+    const selectedIds = editForm.getFieldValue('services') || []
+    const allowedIds = new Set(servicesForEditedPet.map((service) => service.id))
+    const compatibleIds = selectedIds.filter((id) => allowedIds.has(id))
+    if (compatibleIds.length !== selectedIds.length) {
+      editForm.setFieldValue('services', compatibleIds)
+      setEditQuoteData(null)
+    }
+  }, [selectedEditPet, services, servicesForEditedPet, editForm])
 
   const loadBookings = useCallback(async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (viewMode === 'calendar') {
-        params.append('date_from', calendarMonth.startOf('month').format('YYYY-MM-DD'))
-        params.append('date_to', calendarMonth.endOf('month').format('YYYY-MM-DD'))
+      if (viewMode === 'week') {
+        params.append('date_from', calendarWeekStart.format('YYYY-MM-DD'))
+        params.append('date_to', calendarWeekStart.add(6, 'day').format('YYYY-MM-DD'))
       } else if (selectedDate) {
         params.append('date', selectedDate.format('YYYY-MM-DD'))
       }
-      if (statusFilter) params.append('status', statusFilter)
-      const res = await api(`/bookings?${params.toString()}`)
-      setBookings(unwrap(res))
+      if (bookingSearch.trim() && user?.role !== 'customer') {
+        params.set('q', bookingSearch.trim())
+      }
+      params.set('page_size', '100')
+      const allBookings = []
+      let currentPage = 1
+      while (true) {
+        params.set('page', String(currentPage))
+        const response = await api(`/bookings?${params.toString()}`)
+        if (Array.isArray(response)) {
+          allBookings.push(...response)
+          break
+        }
+        const pageResults = response?.results || []
+        allBookings.push(...pageResults)
+        if (!response?.next || pageResults.length === 0) break
+        currentPage += 1
+      }
+      setBookings(allBookings)
     } catch (e) {
       message.error(e.message || 'Không thể tải danh sách lịch hẹn')
     } finally {
       setLoading(false)
     }
-  }, [selectedDate, statusFilter, viewMode, calendarMonth])
+  }, [selectedDate, bookingSearch, user?.role, statusFilter, viewMode, calendarWeekStart])
 
   useEffect(() => {
     loadBookings()
@@ -112,17 +232,34 @@ export default function Bookings() {
       return { petList: isCustomer ? myPets : allPets, pkgs: packages }
     }
     try {
+      const loadAllTechnicians = async () => {
+        const technicians = []
+        let currentPage = 1
+        while (true) {
+          const response = await api(`/staff?role=technician&page=${currentPage}&page_size=100`)
+          if (Array.isArray(response)) {
+            technicians.push(...response)
+            break
+          }
+          const pageResults = response?.results || []
+          technicians.push(...pageResults)
+          if (!response?.next || pageResults.length === 0) break
+          currentPage += 1
+        }
+        return technicians
+      }
+
       const [pkgs, svcs, stf, pts] = await Promise.all([
         api('/packages'),
         api('/services'),
-        isFrontDesk ? api('/staff?role=technician') : Promise.resolve([]),
+        isFrontDesk ? loadAllTechnicians() : Promise.resolve([]),
         api('/pets'),
       ])
       const pList = unwrap(pts)
       const pkgList = unwrap(pkgs)
       setPackages(pkgList)
       setServices(unwrap(svcs))
-      setStaffList(unwrap(stf))
+      setStaffList(stf)
       if (isCustomer) {
         setMyPets(pList)
       } else {
@@ -146,7 +283,6 @@ export default function Bookings() {
   const openEditModal = async (bk) => {
     setEditTarget(bk)
     setEditQuoteData(null)
-    setEditModalOpen(true)
     await ensureMetaLoaded()
     editForm.setFieldsValue({
       pet: bk.pet,
@@ -158,6 +294,7 @@ export default function Bookings() {
       customer_note: bk.customer_note || '',
       note: bk.note_internal || '',
     })
+    setEditModalOpen(true)
   }
 
   const handleEditQuote = async () => {
@@ -401,12 +538,6 @@ export default function Bookings() {
 
   const columns = [
     {
-      title: 'Mã',
-      dataIndex: 'id',
-      width: 70,
-      render: (id) => <Text strong>#{id}</Text>,
-    },
-    {
       title: 'Giờ hẹn',
       dataIndex: 'start_at',
       width: 140,
@@ -492,18 +623,25 @@ export default function Bookings() {
     {
       title: 'Thao tác',
       key: 'act',
-      width: 170,
+      width: 230,
+      align: 'center',
       render: (_, b) => (
-        <Space size="small" wrap onClick={(e) => e.stopPropagation()}>
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={(e) => { e.stopPropagation(); openDetail(b.id) }}>
+        <Space size={6} wrap={false} onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={(e) => { e.stopPropagation(); openDetail(b.id) }}
+            className="booking-row-action booking-row-action-view"
+          >
             Chi tiết
           </Button>
           {['pending', 'confirmed'].includes(b.status) && !isTech && (
             <Button
+              type="text"
               size="small"
               icon={<EditOutlined />}
               onClick={(e) => { e.stopPropagation(); openEditModal(b) }}
-              title="Sửa / dời lịch hẹn"
+              className="booking-row-action booking-row-action-edit"
             >
               Sửa
             </Button>
@@ -513,20 +651,18 @@ export default function Bookings() {
               size="small"
               icon={<DollarOutlined />}
               onClick={(e) => { e.stopPropagation(); nav(`/app/hoa-don?id=${b.invoice.id}`) }}
-              style={{ color: '#0f8b8d', borderColor: '#0f8b8d' }}
-              title="Xem hóa đơn thanh toán"
+              className="booking-row-action booking-row-action-invoice"
             >
               Xem HĐ
             </Button>
           )}
           {b.status === 'completed' && !b.invoice && isFrontDesk && (
             <Button
-              size="small"
               type="primary"
+              size="small"
               icon={<DollarOutlined />}
               onClick={(e) => { e.stopPropagation(); nav(`/app/hoa-don?booking_id=${b.id}`) }}
-              style={{ background: '#d97706', borderColor: '#d97706' }}
-              title="Lập hóa đơn và thu tiền"
+              className="booking-row-action booking-row-action-invoice"
             >
               Lập HĐ
             </Button>
@@ -538,7 +674,7 @@ export default function Bookings() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="booking-page-header">
         <div>
           <Title level={3} style={{ margin: 0 }}>
             {isCustomer ? 'Lịch Hẹn Của Tôi' : isTech ? 'Lịch Hẹn Được Phân Công' : 'Quản Lý Lịch Hẹn Spa'}
@@ -547,8 +683,10 @@ export default function Bookings() {
             Theo dõi tiến trình tiếp nhận, chăm sóc và thanh toán theo thời gian thực (Bấm vào dòng để xem chi tiết)
           </Paragraph>
         </div>
+      </div>
 
-        <Space wrap>
+      <div className="booking-toolbar">
+        <Space wrap className="booking-toolbar-filters">
           <Segmented
             value={viewMode}
             onChange={(val) => {
@@ -557,23 +695,33 @@ export default function Bookings() {
             }}
             options={[
               { label: 'Danh sách', value: 'table', icon: <TableOutlined /> },
-              { label: 'Lịch tháng', value: 'calendar', icon: <CalendarOutlined /> },
+              { label: 'Lịch tuần', value: 'week', icon: <CalendarOutlined /> },
             ]}
           />
 
           {viewMode === 'table' && (
-            <DatePicker
-              value={selectedDate}
-              onChange={(d) => setSelectedDate(d)}
-              allowClear
-              placeholder="Xem theo ngày"
-              style={{ width: 140 }}
-            />
+            <div className="booking-date-filter-field">
+              <Text className="booking-date-filter-label"><CalendarOutlined /> Ngày hẹn</Text>
+              <DatePicker
+                className="booking-date-filter"
+                value={selectedDate}
+                onChange={(date) => {
+                  setSelectedDate(date)
+                  setPage(1)
+                }}
+                allowClear
+                format="DD/MM/YYYY"
+                placeholder="Chọn ngày"
+              />
+            </div>
           )}
 
           <Select
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(value) => {
+              setStatusFilter(value)
+              setPage(1)
+            }}
             style={{ width: 150 }}
             options={[
               { value: '', label: 'Tất cả trạng thái' },
@@ -585,7 +733,8 @@ export default function Bookings() {
               { value: 'cancelled', label: 'Đã hủy' },
             ]}
           />
-
+        </Space>
+        <Space wrap className="booking-toolbar-actions">
           <Button icon={<ReloadOutlined />} onClick={loadBookings}>Làm mới</Button>
 
           {isFrontDesk && (
@@ -605,106 +754,173 @@ export default function Bookings() {
             </Button>
           )}
           {viewMode === 'table' && (
-            <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
+            <div className="booking-page-size-control">
+              <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
+            </div>
           )}
         </Space>
       </div>
 
-      {viewMode === 'calendar' ? (
-        <Card style={{ borderRadius: 16 }}>
-          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <Space>
-              <CalendarOutlined style={{ fontSize: 18, color: '#0f8b8d' }} />
-              <Text strong style={{ fontSize: 16 }}>Lịch theo tháng: {calendarMonth.format('MM/YYYY')}</Text>
-            </Space>
-            <Text type="secondary">Bấm vào ngày để xem chi tiết hoặc bấm trực tiếp vào lịch hẹn để xem nhanh</Text>
-          </div>
-          <Calendar
-            value={selectedDate}
-            onSelect={(d) => setSelectedDate(d)}
-            onPanelChange={(d) => setCalendarMonth(d)}
-            cellRender={(current, info) => {
-              if (info.type !== 'date') return info.originNode
-              const dStr = current.format('YYYY-MM-DD')
-              const dayBookings = bookings.filter((b) => dayjs(b.start_at).format('YYYY-MM-DD') === dStr)
-              if (!dayBookings.length) return null
-              return (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {dayBookings.slice(0, 3).map((item) => (
-                    <li
-                      key={item.id}
-                      onClick={(e) => { e.stopPropagation(); openDetail(item.id) }}
-                      style={{
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        fontSize: 11,
-                        marginBottom: 2,
-                        cursor: 'pointer',
-                        padding: '1px 4px',
-                        borderRadius: 4,
-                        background: '#f8fafc',
-                        border: '1px solid #e2e8f0',
-                      }}
-                      title={`#${item.id} ${item.pet_info?.name} - ${dayjs(item.start_at).format('HH:mm')} (${STATUS_MAP[item.status]?.label})`}
-                    >
-                      <Badge color={STATUS_MAP[item.status]?.color} />
-                      <span style={{ fontWeight: 600, marginLeft: 3 }}>{dayjs(item.start_at).format('HH:mm')}</span>{' '}
-                      <span>{item.pet_info?.name}</span>
-                    </li>
-                  ))}
-                  {dayBookings.length > 3 && (
-                    <li style={{ fontSize: 10, color: '#0f8b8d', fontWeight: 600, paddingLeft: 4 }}>
-                      +{dayBookings.length - 3} lịch nữa
-                    </li>
-                  )}
-                </ul>
-              )
+      <div className="booking-overview-heading">
+        <Text strong className="booking-overview-title">Tổng quan lịch hẹn</Text>
+        <Text className="booking-overview-period">
+          {viewMode === 'week'
+            ? `${calendarWeekStart.format('DD/MM')} – ${calendarWeekStart.add(6, 'day').format('DD/MM/YYYY')}`
+            : selectedDate
+              ? selectedDate.format('DD/MM/YYYY')
+              : 'Tất cả ngày'}
+        </Text>
+      </div>
+      <div className="booking-overview" aria-label="Thống kê lịch hẹn">
+        {bookingStats.map((stat) => (
+          <Card key={stat.key} size="small" loading={loading} className={`booking-overview-card booking-overview-${stat.tone}`}>
+            <Statistic title={stat.label} value={stat.value} />
+          </Card>
+        ))}
+      </div>
+
+      {viewMode === 'table' && user?.role !== 'customer' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 0 12px' }}>
+          <Input.Search
+            allowClear
+            enterButton
+            value={bookingSearchInput}
+            onChange={(event) => {
+              const value = event.target.value
+              setBookingSearchInput(value)
+              if (!value) {
+                setBookingSearch('')
+                setPage(1)
+              }
             }}
+            onSearch={(value) => {
+              setBookingSearch(value.trim())
+              setPage(1)
+            }}
+            placeholder="Tìm thú cưng, khách hàng, số điện thoại"
+            style={{ width: 340, maxWidth: '100%' }}
           />
-          {selectedDate && (
-            <div style={{ marginTop: 24, borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Title level={5} style={{ margin: 0 }}>
-                  📅 Danh sách lịch hẹn ngày {selectedDate.format('DD/MM/YYYY')} ({bookings.filter((b) => dayjs(b.start_at).format('YYYY-MM-DD') === selectedDate.format('YYYY-MM-DD')).length} lịch)
-                </Title>
-                {!isTech && (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<PlusOutlined />}
-                    onClick={() => {
-                      openCreateModal().then(() => {
-                        form.setFieldsValue({
-                          start_at: selectedDate.hour(9).minute(0),
-                        })
-                      })
-                    }}
-                  >
-                    Đặt lịch ngày này
-                  </Button>
-                )}
+        </div>
+      )}
+
+      {viewMode === 'week' ? (
+        <Card className="booking-week-card">
+          <div className="booking-week-header">
+            <div>
+              <Text strong className="booking-week-title">Lịch tuần</Text>
+              <div className="booking-week-range">
+                <CalendarOutlined />
+                <span>
+                  {calendarWeekStart.format('DD/MM/YYYY')} — {calendarWeekStart.add(6, 'day').format('DD/MM/YYYY')}
+                </span>
               </div>
-              <Table
-                dataSource={bookings.filter((b) => dayjs(b.start_at).format('YYYY-MM-DD') === selectedDate.format('YYYY-MM-DD'))}
-                columns={columns}
-                rowKey="id"
-                pagination={false}
-                size="small"
-                rowClassName={() => 'clickable-row'}
-                onRow={(record) => ({
-                  onClick: () => openDetail(record.id),
-                  style: { cursor: 'pointer' },
-                })}
-                locale={{ emptyText: <Empty description="Chưa có lịch hẹn nào trong ngày này." /> }}
-              />
             </div>
-          )}
+            <Space>
+              <Button aria-label="Tuần trước" icon={<LeftOutlined />} onClick={() => setCalendarWeekStart((week) => week.subtract(7, 'day'))} />
+              <Button onClick={() => {
+                const currentWeek = weekStartFor(dayjs())
+                setCalendarWeekStart(currentWeek)
+                setSelectedDate(dayjs())
+              }}>Tuần này</Button>
+              <Button aria-label="Tuần sau" icon={<RightOutlined />} onClick={() => setCalendarWeekStart((week) => week.add(7, 'day'))} />
+            </Space>
+          </div>
+          <div className="booking-calendar-scroll">
+            <div className="booking-calendar-week booking-calendar-week-timed">
+              <div className="booking-calendar-time-heading">Giờ</div>
+              {WEEKDAYS.map((weekday, index) => {
+                const date = calendarWeekStart.add(index, 'day')
+                const isToday = date.isSame(dayjs(), 'day')
+                const isSelected = date.isSame(weekFocusDate, 'day')
+                const count = visibleBookings.filter((booking) => dayjs(booking.start_at).isSame(date, 'day')).length
+                return (
+                  <button
+                    type="button"
+                    key={weekday}
+                    className={`booking-calendar-day-heading${isToday ? ' is-today' : ''}${isSelected ? ' is-selected' : ''}`}
+                    onClick={() => setSelectedDate(date)}
+                  >
+                    <div className="booking-calendar-heading-main">
+                      <span>{weekday}</span>
+                      <div className="booking-calendar-date-line">
+                        <strong>{date.format('DD/MM')}</strong>
+                        {isToday && <em>Hôm nay</em>}
+                      </div>
+                    </div>
+                    <small>{count} lịch hẹn</small>
+                  </button>
+                )
+              })}
+
+              <div className="booking-calendar-time-axis">
+                {Array.from({ length: WEEK_GRID_END_HOUR - WEEK_GRID_START_HOUR }, (_, hourIndex) => (
+                  <span key={hourIndex} style={{ top: hourIndex * WEEK_GRID_HOUR_HEIGHT - 8 }}>
+                    {String(WEEK_GRID_START_HOUR + hourIndex).padStart(2, '0')}:00
+                  </span>
+                ))}
+              </div>
+
+              {WEEKDAYS.map((weekday, index) => {
+                const date = calendarWeekStart.add(index, 'day')
+                const dayKey = date.format('YYYY-MM-DD')
+                const dayBookings = visibleBookings
+                  .filter((booking) => dayjs(booking.start_at).format('YYYY-MM-DD') === dayKey)
+                  .sort((a, b) => dayjs(a.start_at).valueOf() - dayjs(b.start_at).valueOf())
+                return (
+                  <div className="booking-calendar-day-column" key={dayKey} onClick={() => setSelectedDate(date)}>
+                    {Array.from({ length: WEEK_GRID_END_HOUR - WEEK_GRID_START_HOUR }, (_, hourIndex) => (
+                      <div className="booking-calendar-hour-line" key={hourIndex} style={{ top: hourIndex * WEEK_GRID_HOUR_HEIGHT }} />
+                    ))}
+                    {dayBookings.map((booking) => {
+                      const start = dayjs(booking.start_at)
+                      const end = dayjs(booking.end_at)
+                      const offsetMinutes = start.hour() * 60 + start.minute() - WEEK_GRID_START_HOUR * 60
+                      const durationMinutes = Math.max(15, end.diff(start, 'minute'))
+                      const top = Math.max(0, offsetMinutes / 60 * WEEK_GRID_HOUR_HEIGHT)
+                      const bottom = Math.min(
+                        (WEEK_GRID_END_HOUR - WEEK_GRID_START_HOUR) * WEEK_GRID_HOUR_HEIGHT,
+                        (offsetMinutes + durationMinutes) / 60 * WEEK_GRID_HOUR_HEIGHT,
+                      )
+                      if (bottom <= top) return null
+                      return (
+                        <button
+                          type="button"
+                          key={booking.id}
+                          className={`booking-calendar-timed-event booking-week-event-${booking.status}`}
+                          style={{ top, height: Math.max(30, bottom - top) }}
+                          title={`${dayjs(booking.start_at).format('HH:mm')} · ${booking.pet_info?.name || 'Thú cưng'} · ${STATUS_MAP[booking.status]?.label || booking.status}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openDetail(booking.id)
+                          }}
+                        >
+                          <strong>{start.format('HH:mm')} · {booking.pet_info?.name || 'Thú cưng'}</strong>
+                          <span>
+                            {booking.package_name || booking.items?.map((item) => item.service_name).join(', ') || 'Dịch vụ spa'}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          <div className="booking-week-footer">
+            <Text type="secondary">Bấm một lịch hẹn để xem chi tiết. Chọn ngày để đặt lịch cho ngày đó.</Text>
+            {!isTech && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                openCreateModal().then(() => form.setFieldsValue({ start_at: weekFocusDate.hour(9).minute(0) }))
+              }}>
+                Đặt lịch ngày {weekFocusDate.format('DD/MM')}
+              </Button>
+            )}
+          </div>
         </Card>
       ) : (
         <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 16, overflow: 'hidden' }}>
           <Table
-            dataSource={bookings}
+            dataSource={visibleBookings}
             columns={columns}
             rowKey="id"
             loading={loading}
@@ -722,7 +938,7 @@ export default function Bookings() {
               showTotal: (total, range) => `${range[0]}-${range[1]} / ${total} lịch hẹn`,
               onChange: (p) => setPage(p),
             }}
-            locale={{ emptyText: <Empty description="Không có lịch hẹn nào trong ngày đã chọn." /> }}
+            locale={{ emptyText: <Empty description={statusFilter ? 'Không có lịch nào khớp trạng thái đã chọn.' : 'Không có lịch hẹn nào trong khoảng thời gian đã chọn.'} /> }}
           />
         </Card>
       )}
@@ -781,6 +997,13 @@ export default function Bookings() {
                   </div>
                 </div>
               </Descriptions.Item>
+              <Descriptions.Item label="Tiêm phòng">
+                {detailBooking.pet_info?.vaccinations?.length ? (
+                  <Tag color="green">Đã tiêm phòng</Tag>
+                ) : (
+                  <Tag color="gold">Chưa tiêm phòng</Tag>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="Chủ thú">
                 <a
                   style={{ fontWeight: 600, color: '#0b3d3f', cursor: 'pointer' }}
@@ -802,9 +1025,9 @@ export default function Bookings() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="Tổng tiền">{money(detailBooking.total_price)}</Descriptions.Item>
-              {detailBooking.customer_note && (
-                <Descriptions.Item label="Ghi chú của khách">{detailBooking.customer_note}</Descriptions.Item>
-              )}
+              <Descriptions.Item label="Ghi chú của khách">
+                {detailBooking.customer_note?.trim() || <Text type="secondary">Không có ghi chú</Text>}
+              </Descriptions.Item>
               {detailBooking.note_internal && (
                 <Descriptions.Item label="Ghi chú nội bộ">{detailBooking.note_internal}</Descriptions.Item>
               )}
@@ -979,6 +1202,7 @@ export default function Bookings() {
           >
             <Select
               placeholder="Chọn thú cưng"
+              onChange={() => setQuoteData(null)}
               options={(isCustomer ? myPets : allPets).map((p) => ({
                 value: p.id,
                 label: `${p.name} (${p.species === 'dog' ? 'Chó' : 'Mèo'} - ${p.breed || 'chưa rõ'}) [Size: ${p.size_class || 'chưa rõ'}]`,
@@ -1002,7 +1226,9 @@ export default function Bookings() {
                 <Form.Item name="package" label="Chọn gói chăm sóc" rules={[{ required: true, message: 'Chọn gói' }]}>
                   <Select
                     placeholder="Chọn gói chăm sóc"
-                    options={packages.map((pkg) => ({
+                    disabled={!selectedPet}
+                    notFoundContent={selectedPet ? 'Không có gói phù hợp với loài thú cưng này' : 'Vui lòng chọn thú cưng trước'}
+                    options={packagesForSelectedPet.map((pkg) => ({
                       value: pkg.id,
                       label: `${pkg.name} — ${pkg.items.map((i) => i.service_name).join(' + ')}`,
                     }))}
@@ -1013,7 +1239,9 @@ export default function Bookings() {
                   <Select
                     mode="multiple"
                     placeholder="Chọn các dịch vụ"
-                    options={services.map((s) => ({
+                    disabled={!selectedPet}
+                    notFoundContent={selectedPet ? 'Không có dịch vụ phù hợp với loài thú cưng này' : 'Vui lòng chọn thú cưng trước'}
+                    options={servicesForSelectedPet.map((s) => ({
                       value: s.id,
                       label: `${s.name} (~${s.duration_minutes} phút)`,
                     }))}
@@ -1055,6 +1283,14 @@ export default function Bookings() {
             )}
           </Row>
 
+          <div className="booking-duration-note">
+            <ClockCircleOutlined />
+            <span>
+              Giờ làm việc của spa: <strong>{openingHours || 'Chưa có thông tin'}</strong>
+              {openingDays && <span> · {openingDays}</span>}
+            </span>
+          </div>
+
           <Form.Item name="customer_note" label="Ghi chú đặc biệt cho spa (nếu có)">
             <Input.TextArea rows={2} placeholder="Ví dụ: Bé sợ tiếng sấy mạnh, bé đang hơi nhát người lạ..." />
           </Form.Item>
@@ -1068,7 +1304,7 @@ export default function Bookings() {
                   showIcon
                   message={
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>Khung giờ khả dụng & còn tài nguyên!</span>
+                      <span>Khung giờ khả dụng!</span>
                       <Text strong style={{ fontSize: 16, color: '#0f8b8d' }}>
                         Tổng giá: {money(quoteData.total_price)}
                       </Text>
@@ -1208,6 +1444,7 @@ export default function Bookings() {
         centered
         title={`✏️ Sửa / Dời Lịch Hẹn #${editTarget?.id}`}
         open={editModalOpen}
+        zIndex={1100}
         onCancel={() => setEditModalOpen(false)}
         width={680}
         footer={[
@@ -1221,6 +1458,7 @@ export default function Bookings() {
             <Select
               placeholder="Chọn bé cưng"
               disabled={isCustomer}
+              onChange={() => setEditQuoteData(null)}
               options={(isCustomer ? myPets : allPets).map((p) => ({
                 value: p.id,
                 label: `🐾 ${p.name} (${p.species === 'dog' ? 'Chó' : 'Mèo'} - ${p.breed || 'Không rõ'})`,
@@ -1244,8 +1482,10 @@ export default function Bookings() {
                 <Form.Item name="package" label="Chọn gói dịch vụ" rules={[{ required: true, message: 'Vui lòng chọn gói' }]}>
                   <Select
                     placeholder="Chọn gói chăm sóc"
+                    disabled={!selectedEditPet}
                     onChange={() => setEditQuoteData(null)}
-                    options={packages.map((pkg) => ({
+                    notFoundContent={selectedEditPet ? 'Không có gói phù hợp với loài thú cưng này' : 'Vui lòng chọn thú cưng trước'}
+                    options={packagesForEditedPet.map((pkg) => ({
                       value: pkg.id,
                       label: `${pkg.name} (${pkg.species_scope === 'cat' ? 'Dành cho mèo' : pkg.species_scope === 'dog' ? 'Dành cho chó' : 'Chó & Mèo'})`,
                     }))}
@@ -1256,8 +1496,10 @@ export default function Bookings() {
                   <Select
                     mode="multiple"
                     placeholder="Chọn các dịch vụ"
+                    disabled={!selectedEditPet}
                     onChange={() => setEditQuoteData(null)}
-                    options={services.map((s) => ({
+                    notFoundContent={selectedEditPet ? 'Không có dịch vụ phù hợp với loài thú cưng này' : 'Vui lòng chọn thú cưng trước'}
+                    options={servicesForEditedPet.map((s) => ({
                       value: s.id,
                       label: `${s.name} (${s.duration_minutes} phút)`,
                     }))}
@@ -1301,6 +1543,14 @@ export default function Bookings() {
             )}
           </Row>
 
+          <div className="booking-duration-note">
+            <ClockCircleOutlined />
+            <span>
+              Giờ làm việc của spa: <strong>{openingHours || 'Chưa có thông tin'}</strong>
+              {openingDays && <span> · {openingDays}</span>}
+            </span>
+          </div>
+
           <Form.Item name="customer_note" label="Ghi chú yêu cầu của khách">
             <Input.TextArea rows={2} placeholder="Yêu cầu riêng (ví dụ: cắt ngắn lông đuôi, dùng sữa tắm dịu nhẹ...)" />
           </Form.Item>
@@ -1319,7 +1569,7 @@ export default function Bookings() {
                   showIcon
                   message={
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span>Khung giờ khả dụng & còn tài nguyên!</span>
+                      <span>Khung giờ khả dụng!</span>
                       <Text strong style={{ fontSize: 16, color: '#0f8b8d' }}>
                         Tổng giá: {money(editQuoteData.total_price)}
                       </Text>
