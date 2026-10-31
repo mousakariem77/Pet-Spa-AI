@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
+from ai_assistant import data_views as ai_data
 from ai_assistant import views as ai
 from billing import views as billing
 from catalog import views as catalog
@@ -29,6 +30,7 @@ router.register('walk-ins', scheduling.WalkInTicketViewSet, basename='walk-in')
 router.register('invoices', billing.InvoiceViewSet, basename='invoice')
 router.register('notifications', notifications.NotificationViewSet, basename='notification')
 router.register('rebook-reminders', ai.RebookReminderViewSet, basename='rebook-reminder')
+router.register('rebook-rules', ai.RebookRuleViewSet, basename='rebook-rule')
 router.register('ai/logs', ai.AiLogViewSet, basename='ai-log')
 router.register('ai/knowledge-docs', ai.KnowledgeDocViewSet, basename='knowledge-doc')
 router.register('service-contraindications', ai.ServiceContraindicationViewSet, basename='service-contraindication')
@@ -44,6 +46,14 @@ api_patterns = [
     path('ai/suggest-staff', ai.AiStaffSuggestionView.as_view()),
     path('ai/suggestions/<int:pk>/decide', ai.AiSuggestionDecideView.as_view()),
     path('ai/chat', ai.AiChatView.as_view()),
+    # API dữ liệu chỉ đọc cho lớp AI (lớp AI không đọc thẳng CSDL)
+    path('ai/data/knowledge', ai_data.KnowledgeDataView.as_view()),
+    path('ai/data/my-pets', ai_data.MyPetsDataView.as_view()),
+    path('ai/data/pets/<int:pk>', ai_data.PetProfileDataView.as_view()),
+    path('ai/data/packages', ai_data.PackageCatalogDataView.as_view()),
+    path('ai/data/contraindications', ai_data.ContraindicationDataView.as_view()),
+    path('ai/data/bookings/<int:pk>/staff-candidates', ai_data.StaffCandidatesDataView.as_view()),
+    path('ai/data/rebook-candidates', ai_data.RebookCandidatesDataView.as_view()),
     path('', include(router.urls)),
 ]
 

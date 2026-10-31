@@ -235,6 +235,17 @@ def create_booking(user, pet, package_id, service_ids, start_at, staff_id=None, 
     elif pet.client.user_id:
         notify([pet.client.user], 'booking_confirmed', 'Lịch hẹn đã được xác nhận',
                f'{pet.name} - {timezone.localtime(start_at):%d/%m %H:%M}', 'booking', booking.pk)
+
+    # Chuyển trạng thái các lời nhắc tái spa của bé sang 'booked' (đã đặt lại lịch)
+    try:
+        from ai_assistant.models import RebookReminder
+        RebookReminder.objects.filter(
+            pet=pet,
+            status__in=[RebookReminder.Status.SUGGESTED, RebookReminder.Status.APPROVED, RebookReminder.Status.SENT]
+        ).update(status=RebookReminder.Status.BOOKED)
+    except Exception:
+        pass
+
     return booking
 
 

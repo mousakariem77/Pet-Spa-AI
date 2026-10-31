@@ -7,7 +7,10 @@ class KnowledgeDoc(models.Model):
 
     class DocType(models.TextChoices):
         SOP = 'sop', 'Quy trình chuẩn (SOP)'
-        PRICE_LIST = 'price_list', 'Bảng giá dịch vụ'
+        GUIDE = 'guide', 'Cẩm nang giống & Chăm sóc'
+        POLICY = 'policy', 'Chính sách an toàn & Da liễu'
+        FAQ = 'faq', 'Hỏi đáp thường gặp (FAQ)'
+        PRICE_LIST = 'price_list', 'Bảng giá dịch vụ (Legacy)'
 
     title = models.CharField('Tiêu đề tài liệu', max_length=200)
     doc_type = models.CharField(max_length=20, choices=DocType.choices, default=DocType.SOP)
@@ -94,6 +97,30 @@ class RebookReminder(models.Model):
 
     def __str__(self):
         return f'Nhắc {self.pet.name} ({self.due_date}) [{self.status}]'
+
+
+class RebookSetting(models.Model):
+    """Cấu hình tự động quét và tạo lời nhắc tái spa định kỳ."""
+
+    auto_scan_enabled = models.BooleanField('Tự động quét chu kỳ hàng ngày', default=True)
+    scan_time = models.CharField('Khung giờ quét hàng ngày (HH:MM)', max_length=5, default='08:00')
+    auto_approve = models.BooleanField('Tự động gửi thông báo khi đến hạn', default=False)
+    advance_days = models.PositiveSmallIntegerField('Số ngày nhắc trước hạn', default=0)
+    last_scanned_at = models.DateTimeField('Lần quét tự động gần nhất', null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Cấu hình nhắc tái spa'
+        verbose_name_plural = 'Cấu hình nhắc tái spa'
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        status = 'Bật' if self.auto_scan_enabled else 'Tắt'
+        return f'Cấu hình nhắc tái spa ({status} - {self.scan_time})'
 
 
 class AiLog(models.Model):

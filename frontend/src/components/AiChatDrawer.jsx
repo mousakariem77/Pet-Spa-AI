@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import {
-  Alert, Avatar, Button, Card, Drawer, FloatButton, Input, List, Space,
+  Avatar, Button, Card, Drawer, FloatButton, Input, List, Modal, Space,
   Spin, Tag, Typography, message,
 } from 'antd'
 import {
-  BookOutlined, ClearOutlined, CustomerServiceOutlined, RobotOutlined,
-  SendOutlined, UserOutlined, WarningOutlined,
+  ClearOutlined, CustomerServiceOutlined, ExclamationCircleOutlined, RobotOutlined,
+  SendOutlined, UserOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { api } from '../api.js'
@@ -13,20 +13,178 @@ import { useAuth } from '../auth.jsx'
 
 const { Text, Paragraph } = Typography
 
+function getAssistantLoadingText(text) {
+  const clean = (text || '').toLowerCase().trim()
+
+  // 1. Chào hỏi, cảm ơn, xã giao thông thường (không mang tính tra cứu tài liệu)
+  const isSmallTalk =
+    /^(xin chào|chào|chao|hi|hello|hey|alo|bạn là ai|em là ai|tên gì|cảm ơn|cam on|thanks|thank you|tạm biệt|bye|ok|oke|dạ|vâng|được rồi|tuyệt vời)(\b|\s|[!.,?~])/i.test(clean) ||
+    (clean.length <= 10 && !clean.includes('?') && !/(giá|tắm|cắt|spa|lịch)/.test(clean))
+
+  if (isSmallTalk) {
+    const list = [
+      'Em đang chuẩn bị câu trả lời cho bạn...',
+      'Đợi em một chút, em đang soạn tin nhắn phản hồi...',
+      'Em đang suy nghĩ phản hồi bạn đây ạ...',
+      'Trợ lý đang lắng nghe và phản hồi bạn...',
+    ]
+    return list[Math.floor(Math.random() * list.length)]
+  }
+
+  // 2. Hỏi về bảng giá, chi phí, gói dịch vụ
+  if (/giá|nhiêu tiền|bao nhiêu|chi phí|bảng giá|combo|gói|khuyến mãi|voucher|ưu đãi/.test(clean)) {
+    const list = [
+      'Em đang kiểm tra bảng giá dịch vụ cho bé cưng...',
+      'Đợi em xíu, em đang tra cứu chi phí các gói spa...',
+      'Em đang xem bảng giá và gói chăm sóc phù hợp...',
+    ]
+    return list[Math.floor(Math.random() * list.length)]
+  }
+
+  // 3. Hỏi về quy trình, kỹ thuật, an toàn, sức khỏe lông da, chính sách
+  if (/quy trình|sop|an toàn|chuồng|bàn cắt|dị ứng|nhạy cảm|viêm da|nước ấm|hủy lịch|đổi lịch|chính sách|thanh toán|mấy giờ|giờ mở cửa|địa chỉ|ở đâu/.test(clean)) {
+    const list = [
+      'Em đang tra cứu quy trình chuẩn SOP của Spa...',
+      'Đợi em một chút, em đang kiểm tra sổ tay quy trình và lưu ý an toàn...',
+      'Em đang đối chiếu quy định và chính sách của Pet Spa...',
+    ]
+    return list[Math.floor(Math.random() * list.length)]
+  }
+
+  // 4. Các câu hỏi tư vấn thắc mắc chung
+  if (clean.includes('?') || /sao|thế nào|như nào|gì|được không|tư vấn|hướng dẫn|giúp|cho hỏi/.test(clean)) {
+    const list = [
+      'Em đang tra cứu thông tin để giải đáp cho bạn...',
+      'Đợi em một chút, em đang tìm câu trả lời chính xác nhất...',
+      'Em đang tổng hợp thông tin để tư vấn cho bạn nhé...',
+    ]
+    return list[Math.floor(Math.random() * list.length)]
+  }
+
+  // 5. Mặc định
+  const list = [
+    'Em đang suy nghĩ phản hồi cho bạn...',
+    'Đợi em xíu, em đang chuẩn bị câu trả lời...',
+    'Em đang soạn tin nhắn phản hồi bạn đây ạ...',
+  ]
+  return list[Math.floor(Math.random() * list.length)]
+}
+
+export const cleanMessageText = (text) => {
+  if (!text) return ''
+  // Chuyển bullet * ở đầu dòng thành -
+  let clean = text.replace(/^\s*\*\s+/gm, '- ')
+  // Loại bỏ hoàn toàn tất cả dấu * (markdown bold/italic/bullets)
+  clean = clean.replace(/\*/g, '')
+  // Làm mềm các cụm từ máy móc nếu có
+  clean = clean.replace(/(hiện tại\s+)?(trong|theo)\s+tài liệu\s*(mà\s*em\s*có\s*)?(được\s*cung\s*cấp\s*)?(của\s*spa\s*)?,?\s*/gi, 'hiện tại em ')
+  clean = clean.replace(/hiện tại\s+hiện tại\s+em/gi, 'hiện tại em')
+  clean = clean.replace(/hiện tại em\s*,\s*/gi, 'hiện tại em ')
+  clean = clean.replace(/hiện tại em không có thông tin/g, 'hiện tại em chưa có thông tin')
+  clean = clean.replace(/hiện tại em chưa có tài liệu/g, 'hiện tại em chưa có thông tin')
+  clean = clean.trim()
+  if (clean && clean[0] === clean[0].toLowerCase()) {
+    clean = clean.charAt(0).toUpperCase() + clean.slice(1)
+  }
+  return clean
+}
+
+const WELCOME_MESSAGE = {
+  sender: 'ai',
+  text: 'Xin chào! Em là Trợ lý AI của Pet Spa. Em có thể giải đáp các thắc mắc về quy trình spa chuẩn SOP, chính sách đặt lịch, bảng giá dịch vụ theo size hoặc lưu ý chăm sóc thú cưng nhạy cảm. Bạn muốn tìm hiểu gì ạ?',
+  sources: [],
+  time: new Date().toISOString(),
+}
+
+const getStorageKey = (userId) => (userId ? `pet_spa_ai_chat_user_${userId}` : 'pet_spa_ai_chat_guest')
+
 export default function AiChatDrawer() {
   const { user } = useAuth()
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState([
-    {
-      sender: 'ai',
-      text: 'Xin chào! Em là Trợ lý AI của Pet Spa. Em có thể giải đáp các thắc mắc về quy trình spa chuẩn SOP, chính sách đặt lịch, bảng giá dịch vụ theo size hoặc lưu ý chăm sóc thú cưng nhạy cảm. Bạn muốn tìm hiểu gì ạ?',
-      sources: [],
-      time: new Date(),
-    },
-  ])
+  const storageKey = getStorageKey(user?.id)
+
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [WELCOME_MESSAGE]
+  })
+
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingText, setLoadingText] = useState('')
+  const [myPets, setMyPets] = useState([])
+  const [selectedPetId, setSelectedPetId] = useState(null)
   const messagesEndRef = useRef(null)
+
+  // Đồng bộ lịch sử tin nhắn khi chuyển đổi tài khoản người dùng
+  useEffect(() => {
+    try {
+      const key = getStorageKey(user?.id)
+      const saved = localStorage.getItem(key)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed)
+          return
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setMessages([WELCOME_MESSAGE])
+  }, [user?.id])
+
+  // Lưu lịch sử tin nhắn vào localStorage mỗi khi có tin nhắn mới hoặc thay đổi
+  useEffect(() => {
+    try {
+      const key = getStorageKey(user?.id)
+      localStorage.setItem(key, JSON.stringify(messages))
+    } catch {
+      // ignore
+    }
+  }, [messages, user?.id])
+
+  // Tải danh sách thú cưng và khôi phục bé đã chọn trước đó
+  useEffect(() => {
+    if (open && user) {
+      api('/ai/data/my-pets')
+        .then((pets) => {
+          if (Array.isArray(pets)) {
+            setMyPets(pets)
+            if (pets.length > 0) {
+              const savedPetId = localStorage.getItem(`pet_spa_ai_pet_${user.id}`)
+              const match = pets.find((p) => String(p.id) === String(savedPetId))
+              if (match) {
+                setSelectedPetId(match.id)
+              } else if (!selectedPetId) {
+                setSelectedPetId(pets[0].id)
+              }
+            }
+          }
+        })
+        .catch(() => {})
+    }
+  }, [open, user])
+
+  const handleSelectPet = (id) => {
+    setSelectedPetId(id)
+    if (user?.id) {
+      if (id) {
+        localStorage.setItem(`pet_spa_ai_pet_${user.id}`, String(id))
+      } else {
+        localStorage.removeItem(`pet_spa_ai_pet_${user.id}`)
+      }
+    }
+  }
 
   // Drag state: Không lưu vào localStorage để mỗi lần reload trang luôn trở về vị trí mặc định
   const [position, setPosition] = useState(null) // null = vị trí mặc định theo CSS (bottom: 24px, right: 24px)
@@ -158,16 +316,17 @@ export default function AiChatDrawer() {
     }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
+    setLoadingText(getAssistantLoadingText(q))
     setLoading(true)
 
     try {
       const res = await api('/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ question: q }),
+        body: JSON.stringify({ question: q, pet_id: selectedPetId || undefined }),
       })
       const aiMsg = {
         sender: 'ai',
-        text: res.answer,
+        text: cleanMessageText(res.answer),
         sources: res.sources || [],
         warning: res.warning,
         time: new Date(),
@@ -192,7 +351,36 @@ export default function AiChatDrawer() {
     setInput(q)
   }
 
+  const handleClearHistory = () => {
+    if (messages.length <= 1) {
+      message.info('Hội thoại hiện chưa có tin nhắn mới để làm sạch.')
+      return
+    }
+
+    Modal.confirm({
+      title: 'Làm sạch cuộc hội thoại?',
+      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+      content: 'Bạn có chắc chắn muốn xóa toàn bộ lịch sử tin nhắn trong phiên này không? Tin nhắn chào mừng ban đầu sẽ được giữ lại.',
+      okText: 'Xác nhận xóa',
+      okType: 'danger',
+      cancelText: 'Hủy',
+      centered: true,
+      onOk: () => {
+        const resetMessages = [WELCOME_MESSAGE]
+        setMessages(resetMessages)
+        try {
+          const key = getStorageKey(user?.id)
+          localStorage.setItem(key, JSON.stringify(resetMessages))
+        } catch {
+          // ignore
+        }
+        message.success('Đã làm sạch lịch sử hội thoại.')
+      },
+    })
+  }
+
   const isLeft = position ? position.x < 160 : false
+  const selectedPet = myPets.find((p) => p.id === selectedPetId)
   const bubbleStyle = {
     ...(position
       ? {
@@ -274,7 +462,6 @@ export default function AiChatDrawer() {
                   24/7
                 </Tag>
               </div>
-              <div><Text type="secondary" style={{ fontSize: 11 }}>Trích xuất tri thức từ tài liệu SOP & Bảng giá</Text></div>
             </div>
           </div>
         }
@@ -282,30 +469,89 @@ export default function AiChatDrawer() {
         width={480}
         onClose={() => setOpen(false)}
         open={open}
+        styles={{ body: { padding: '16px', overflowX: 'hidden' } }}
+        bodyStyle={{ padding: '16px', overflowX: 'hidden' }}
         extra={
           <Button
             type="text"
             size="small"
             icon={<ClearOutlined />}
-            onClick={() => setMessages(messages.slice(0, 1))}
+            onClick={handleClearHistory}
           >
             Làm sạch hội thoại
           </Button>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          {/* Cảnh báo cố định theo đặc tả thiết kế */}
-          <Alert
-            type="warning"
-            showIcon
-            icon={<WarningOutlined />}
-            message="Lưu ý phạm vi hỗ trợ"
-            description="Gợi ý của AI chỉ mang tính tham khảo dịch vụ thẩm mỹ và quy trình spa, không thay thế chẩn đoán bệnh lý y khoa thú y."
-            style={{ marginBottom: 12, borderRadius: 10, fontSize: 12 }}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowX: 'hidden', width: '100%' }}>
+          {/* Thanh chọn hồ sơ bé nếu khách đã đăng nhập và có thú cưng */}
+          {user && myPets.length > 0 && (
+            <div
+              style={{
+                background: '#f0fdfa',
+                border: '1px solid #99f6e4',
+                borderRadius: 10,
+                padding: '8px 12px',
+                marginBottom: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: '#0f766e' }}>
+                <span>🐾 <strong>Hồ sơ bé:</strong></span>
+                <select
+                  value={selectedPetId || ''}
+                  onChange={(e) => handleSelectPet(e.target.value ? Number(e.target.value) : null)}
+                  style={{
+                    border: '1px solid #14b8a6',
+                    borderRadius: 6,
+                    padding: '3px 8px',
+                    background: '#fff',
+                    fontSize: 12,
+                    color: '#0f766e',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="">Tất cả bé của tôi</option>
+                  {myPets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.breed || p.species_display} · Size {p.size_class})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedPet && (
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <Tag color="cyan" style={{ margin: 0, fontSize: 11, borderRadius: 10 }}>
+                    {selectedPet.weight_kg}kg · Size {selectedPet.size_class}
+                  </Tag>
+                  {selectedPet.health_tags && selectedPet.health_tags.length > 0 && (
+                    <Tag color="orange" style={{ margin: 0, fontSize: 11, borderRadius: 10 }}>
+                      {selectedPet.health_tags.map((t) => t.name_vi).join(', ')}
+                    </Tag>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Khung chat tin nhắn */}
-          <div style={{ flex: 1, overflowY: 'auto', paddingRight: 6, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              paddingRight: 6,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+              width: '100%',
+            }}
+          >
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -314,6 +560,7 @@ export default function AiChatDrawer() {
                   alignItems: 'flex-start',
                   gap: 8,
                   flexDirection: m.sender === 'user' ? 'row-reverse' : 'row',
+                  maxWidth: '100%',
                 }}
               >
                 {/* Avatar bên cạnh từng tin nhắn */}
@@ -343,31 +590,27 @@ export default function AiChatDrawer() {
 
                 <div
                   style={{
-                    maxWidth: '80%',
+                    maxWidth: '82%',
                     padding: '12px 16px',
                     borderRadius: m.sender === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                     background: m.sender === 'user' ? 'linear-gradient(135deg, #0f8b8d, #0d9488)' : '#f1f5f9',
                     color: m.sender === 'user' ? '#fff' : '#1f2937',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere',
                   }}
                 >
-                  <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, fontSize: 13.5 }}>
-                    {m.text}
+                  <div
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.5,
+                      fontSize: 13.5,
+                      wordBreak: 'break-word',
+                      overflowWrap: 'anywhere',
+                    }}
+                  >
+                    {cleanMessageText(m.text)}
                   </div>
-
-                  {/* Nguồn trích dẫn tài liệu */}
-                  {m.sources && m.sources.length > 0 && (
-                    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #cbd5e1' }}>
-                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4, color: m.sender === 'user' ? '#e2e8f0' : undefined }}>
-                        <BookOutlined style={{ marginRight: 4 }} /> Nguồn tài liệu đối chiếu:
-                      </Text>
-                      {m.sources.map((s, i) => (
-                        <Tag key={i} color="cyan" style={{ fontSize: 11, margin: '2px 4px 2px 0' }}>
-                          {s.doc_title} ({s.heading})
-                        </Tag>
-                      ))}
-                    </div>
-                  )}
 
                   <div
                     style={{
@@ -384,13 +627,16 @@ export default function AiChatDrawer() {
             ))}
 
             {loading && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', fontSize: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', fontSize: 12.5, padding: '4px 0' }}>
                 <Avatar
                   src="/images/ai_avatar.jpg"
                   size={26}
-                  style={{ border: '1px solid #14b8a6' }}
+                  style={{ border: '1px solid #14b8a6', flexShrink: 0 }}
                 />
-                <Spin size="small" /> Trợ lý AI đang tra cứu quy trình và chuẩn bị câu trả lời...
+                <Spin size="small" />
+                <span style={{ color: '#0d9488', fontStyle: 'italic' }}>
+                  {loadingText || 'Trợ lý AI đang suy nghĩ...'}
+                </span>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -402,23 +648,57 @@ export default function AiChatDrawer() {
               Gợi ý câu hỏi phổ biến:
             </Text>
             <Space wrap size={[4, 6]}>
+              {selectedPet ? (
+                <>
+                  <Tag
+                    color="processing"
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion(`Chu kỳ tắm và chăm sóc lông định kỳ cho bé ${selectedPet.name} (${selectedPet.breed || selectedPet.species_display}) là bao lâu?`)}
+                  >
+                    Chu kỳ tắm {selectedPet.name}?
+                  </Tag>
+                  <Tag
+                    color="processing"
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion(`Bé ${selectedPet.name} bị viêm da hoặc dị ứng thì có tắm spa được không?`)}
+                  >
+                    {selectedPet.name} viêm da có tắm được?
+                  </Tag>
+                  <Tag
+                    color="processing"
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion(`Bảng giá các gói tắm và combo cho bé ${selectedPet.name} (size ${selectedPet.size_class})?`)}
+                  >
+                    Giá gói cho {selectedPet.name}?
+                  </Tag>
+                </>
+              ) : (
+                <>
+                  <Tag
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion('Chu kỳ tắm và cắt tỉa định kỳ theo từng giống thú cưng?')}
+                  >
+                    Chu kỳ tắm theo giống?
+                  </Tag>
+                  <Tag
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion('Thú cưng bị viêm da, ngứa ngáy hoặc dị ứng có tắm được không?')}
+                  >
+                    Thú viêm da có tắm được?
+                  </Tag>
+                  <Tag
+                    style={{ cursor: 'pointer', borderRadius: 12 }}
+                    onClick={() => handleQuickQuestion('Bảng giá các gói dịch vụ spa theo từng size?')}
+                  >
+                    Bảng giá gói theo size?
+                  </Tag>
+                </>
+              )}
               <Tag
                 style={{ cursor: 'pointer', borderRadius: 12 }}
                 onClick={() => handleQuickQuestion('Quy định an toàn bàn cắt tỉa và chuồng sấy?')}
               >
                 An toàn bàn cắt?
-              </Tag>
-              <Tag
-                style={{ cursor: 'pointer', borderRadius: 12 }}
-                onClick={() => handleQuickQuestion('Thú cưng bị da nhạy cảm thì tắm loại nào?')}
-              >
-                Da nhạy cảm tắm gì?
-              </Tag>
-              <Tag
-                style={{ cursor: 'pointer', borderRadius: 12 }}
-                onClick={() => handleQuickQuestion('Chính sách hủy lịch hẹn như thế nào?')}
-              >
-                Chính sách hủy lịch?
               </Tag>
             </Space>
           </div>
