@@ -373,15 +373,23 @@ class Command(BaseCommand):
 
         # 2. Luật chu kỳ nhắc tái spa (SPA-28)
         rules = [
-            ('vip', 45, 14, 'Chu kỳ cắt tỉa lông tạo kiểu 6-8 tuần cho giống Poodle / lông dài'),
-            ('basic', 30, 10, 'Chu kỳ tắm vệ sinh và cắt móng định kỳ 3-4 tuần'),
-            ('cat_care', 40, 14, 'Chu kỳ spa thư giãn định kỳ cho mèo 5-6 tuần'),
+            ('vip', 'dog', 'curly', 45, 14, 'Chu kỳ cắt tỉa lông tạo kiểu 6-8 tuần cho giống Poodle / lông dài'),
+            ('basic', 'all', 'all', 30, 10, 'Chu kỳ tắm vệ sinh và cắt móng định kỳ 3-4 tuần'),
+            ('cat_care', 'cat', 'all', 40, 14, 'Chu kỳ spa thư giãn định kỳ cho mèo 5-6 tuần'),
         ]
-        for pkg_code, interval, overdue, note in rules:
+        for pkg_code, species, coat_type, interval, overdue, note in rules:
             pkg = Package.objects.filter(code=pkg_code).first()
             if pkg:
                 RebookRule.objects.update_or_create(
-                    package=pkg, defaults={'interval_days': interval, 'overdue_days': overdue, 'note_vi': note})
+                    package=pkg,
+                    defaults={
+                        'species': species,
+                        'coat_type': coat_type,
+                        'interval_days': interval,
+                        'overdue_days': overdue,
+                        'note_vi': note,
+                    },
+                )
 
         # 3. Tài liệu tri thức SOP & Bảng giá (SPA-24)
         doc1, _ = KnowledgeDoc.objects.update_or_create(
@@ -412,9 +420,9 @@ class Command(BaseCommand):
         ])
 
         doc2, _ = KnowledgeDoc.objects.update_or_create(
-            title='Chính sách đặt hẹn, hủy lịch và bảng giá',
+            title='Chính sách đặt hẹn, hủy lịch và thanh toán',
             defaults={
-                'doc_type': KnowledgeDoc.DocType.PRICE_LIST,
+                'doc_type': KnowledgeDoc.DocType.POLICY,
                 'version': 1,
                 'uploaded_by': quanly,
                 'is_active': True,
@@ -435,7 +443,7 @@ class Command(BaseCommand):
         ])
 
         # 4. Quét và tạo các bản ghi nhắc tái spa mẫu
-        ai_services.generate_rebook_reminders()
+        ai_services.generate_rebook_reminders(quanly)
 
     def _seed_notifications(self):
         """Tạo dữ liệu mẫu thông báo chuẩn vai trò cho từng nhóm người dùng."""

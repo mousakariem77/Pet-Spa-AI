@@ -102,6 +102,47 @@ body {
   margin-top: 16px !important;
 }
 
+/* Dedicated styling for AI Knowledge Doc Modal: Thanh cuộn bên trong modal, không tràn màn hình, chiều cao cố định không nhảy */
+.ai-knowledge-modal .ant-modal-content {
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+}
+
+.ai-knowledge-modal .ant-modal-header {
+  margin-bottom: 12px !important;
+}
+
+.ai-knowledge-modal .ant-modal-body {
+  height: min(480px, calc(100vh - 180px)) !important;
+  max-height: min(480px, calc(100vh - 180px)) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-right: 8px !important;
+}
+
+.ai-knowledge-modal .ant-modal-footer {
+  margin-top: 14px !important;
+  padding-top: 12px !important;
+  border-top: 1px solid #f1f5f9 !important;
+}
+
+/* Thanh cuộn bên trong modal rõ ràng, êm mượt */
+.ai-knowledge-modal .ant-modal-body::-webkit-scrollbar {
+  width: 7px !important;
+}
+.ai-knowledge-modal .ant-modal-body::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+  border-radius: 4px !important;
+}
+.ai-knowledge-modal .ant-modal-body::-webkit-scrollbar-thumb {
+  background: #94a3b8 !important;
+  border-radius: 4px !important;
+}
+.ai-knowledge-modal .ant-modal-body::-webkit-scrollbar-thumb:hover {
+  background: #64748b !important;
+}
+
 /* ===== APP LAYOUT & SHARED ===== */
 .brand {
   display: flex;
