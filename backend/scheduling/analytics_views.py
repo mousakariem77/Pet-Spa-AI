@@ -47,7 +47,15 @@ def _parse_date_range(request):
         if earliest_invoice:
             earliest_dates.append(timezone.localdate(earliest_invoice.created_at))
         start_d = min(earliest_dates) if earliest_dates else today - timedelta(days=30)
-        end_d = today + timedelta(days=30)
+
+        latest_booking = Booking.objects.order_by('-start_at').first()
+        latest_invoice = Invoice.objects.order_by('-created_at').first()
+        latest_dates = [today]
+        if latest_booking:
+            latest_dates.append(timezone.localdate(latest_booking.start_at))
+        if latest_invoice:
+            latest_dates.append(timezone.localdate(latest_invoice.created_at))
+        end_d = max(latest_dates)
     else:
         req_start = parse_date(request.query_params.get('start_date', ''))
         req_end = parse_date(request.query_params.get('end_date', ''))

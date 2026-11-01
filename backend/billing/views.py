@@ -1,3 +1,5 @@
+from decimal import Decimal
+from django.db.models import Q, Sum
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -5,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import Role
-from scheduling.models import Booking, BookingStatus
+from scheduling.models import Booking, BookingItem, BookingStatus
 
 from . import services
 from .models import Invoice, InvoiceLine
@@ -19,17 +21,38 @@ class InvoiceLineSerializer(serializers.ModelSerializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     lines = InvoiceLineSerializer(many=True, read_only=True)
+    booking_id = serializers.IntegerField(source='booking.id', read_only=True)
+    client_id = serializers.IntegerField(source='booking.client.id', read_only=True)
     client_name = serializers.CharField(source='booking.client.full_name', read_only=True)
     client_phone = serializers.CharField(source='booking.client.phone', read_only=True)
+    client_address = serializers.CharField(source='booking.client.address', read_only=True)
+    pet_id = serializers.IntegerField(source='booking.pet.id', read_only=True)
     pet_name = serializers.CharField(source='booking.pet.name', read_only=True)
+    pet_species = serializers.CharField(source='booking.pet.species', read_only=True)
+    pet_breed = serializers.CharField(source='booking.pet.breed', read_only=True)
+    pet_weight_kg = serializers.DecimalField(source='booking.pet.weight_kg', max_digits=5, decimal_places=2, read_only=True)
+    pet_size_class = serializers.CharField(source='booking.pet.size_class', read_only=True)
+    package_name = serializers.CharField(source='booking.package.name', read_only=True)
+    staff_name = serializers.SerializerMethodField()
     booking_start_at = serializers.DateTimeField(source='booking.start_at', read_only=True)
+    channel = serializers.CharField(source='booking.channel', read_only=True)
     received_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
-        fields = ['id', 'invoice_no', 'booking', 'client_name', 'client_phone', 'pet_name', 'booking_start_at',
-                  'subtotal', 'total', 'status', 'payment_method', 'paid_at', 'received_by_name',
-                  'void_reason', 'created_at', 'lines']
+        fields = [
+            'id', 'invoice_no', 'booking', 'booking_id',
+            'client_id', 'client_name', 'client_phone', 'client_address',
+            'pet_id', 'pet_name', 'pet_species', 'pet_breed', 'pet_weight_kg', 'pet_size_class',
+            'package_name', 'staff_name', 'booking_start_at', 'channel',
+            'subtotal', 'total', 'status', 'payment_method', 'paid_at',
+            'received_by_name', 'void_reason', 'created_at', 'lines',
+        ]
+
+    def get_staff_name(self, inv):
+        if inv.booking and inv.booking.staff and inv.booking.staff.user:
+            return inv.booking.staff.user.full_name or inv.booking.staff.user.username
+        return None
 
     def get_received_by_name(self, inv):
         u = inv.received_by
@@ -37,7 +60,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 
 class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
-    """invoices — Khách xem hóa đơn của mình. Lễ tân/Quản lý xem, tạo và thu. Chỉ Quản lý hủy."""
+    """invoices — Quản lý hóa đơn & thu ngân spa (SPA-19)."""
 
     serializer_class = InvoiceSerializer
     permission_classes = [IsAuthenticated]
@@ -46,16 +69,65 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
         u = self.request.user
         if u.role == Role.TECHNICIAN:
             return Invoice.objects.none()
-        qs = Invoice.objects.select_related('booking__client', 'booking__pet', 'received_by').prefetch_related('lines')
+        qs = Invoice.objects.select_related(
+            'booking__client', 'booking__pet', 'booking__package',
+            'booking__staff__user', 'received_by'
+        ).prefetch_related('lines')
         if u.role == Role.CUSTOMER:
             qs = qs.filter(booking__client__user=u)
+
         p = self.request.query_params
-        if p.get('status'):
-            qs = qs.filter(status=p['status'])
-        if p.get('q'):
-            qs = qs.filter(Q(invoice_no__icontains=p['q']) | Q(booking__client__full_name__icontains=p['q'])
-                           | Q(booking__pet__name__icontains=p['q']))
+        status_param = p.get('status')
+        if status_param and status_param != 'all':
+            qs = qs.filter(status=status_param)
+
+        payment_method = p.get('payment_method')
+        if payment_method and payment_method != 'all':
+            qs = qs.filter(payment_method=payment_method)
+
+        q = p.get('q')
+        if q:
+            q_clean = q.strip()
+            qs = qs.filter(
+                Q(invoice_no__icontains=q_clean)
+                | Q(booking__client__full_name__icontains=q_clean)
+                | Q(booking__client__phone__icontains=q_clean)
+                | Q(booking__pet__name__icontains=q_clean)
+            )
+
+        ordering = p.get('ordering')
+        if ordering:
+            allowed_orderings = {
+                '-created_at': '-created_at',
+                'created_at': 'created_at',
+                '-total': '-total',
+                'total': 'total',
+            }
+            if ordering in allowed_orderings:
+                qs = qs.order_by(allowed_orderings[ordering])
+
         return qs
+
+    @action(detail=False, methods=['get'], url_path='counts')
+    def counts(self, request):
+        u = self.request.user
+        if u.role == Role.TECHNICIAN:
+            return Response({'all': 0, 'unpaid': 0, 'paid': 0, 'void': 0, 'revenue': 0})
+        qs = Invoice.objects.all()
+        if u.role == Role.CUSTOMER:
+            qs = qs.filter(booking__client__user=u)
+        total = qs.count()
+        unpaid = qs.filter(status=Invoice.Status.UNPAID).count()
+        paid = qs.filter(status=Invoice.Status.PAID).count()
+        void = qs.filter(status=Invoice.Status.VOID).count()
+        total_revenue = qs.filter(status=Invoice.Status.PAID).aggregate(t=Sum('total'))['t'] or 0
+        return Response({
+            'all': total,
+            'unpaid': unpaid,
+            'paid': paid,
+            'void': void,
+            'revenue': int(total_revenue),
+        })
 
     def create(self, request, *args, **kwargs):
         if request.user.role not in (Role.RECEPTIONIST, Role.MANAGER):
@@ -81,7 +153,6 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
 
         from customers.models import Pet
         from catalog.models import Package, Service
-        from scheduling.models import BookingItem
         from django.utils import timezone
 
         try:
@@ -119,6 +190,7 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
                 items_to_create.append(BookingItem(
                     booking=booking,
                     service=pi.service,
+                    resource_type=pi.service.resource_type or 'bath_tub',
                     position=idx + 1,
                     unit_price=p_price if idx == 0 else 0,
                     start_at=start_time,
@@ -133,6 +205,7 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
                 items_to_create.append(BookingItem(
                     booking=booking,
                     service=s,
+                    resource_type=s.resource_type or 'bath_tub',
                     position=idx + 1,
                     unit_price=price,
                     start_at=start_time,
@@ -156,19 +229,29 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
     def unbilled_bookings(self, request):
         if request.user.role not in (Role.RECEPTIONIST, Role.MANAGER):
             raise PermissionDenied()
-        qs = Booking.objects.filter(status=BookingStatus.COMPLETED, invoice__isnull=True).select_related('client', 'pet', 'package')
+        qs = Booking.objects.filter(
+            status__in=[BookingStatus.COMPLETED, BookingStatus.IN_PROGRESS, BookingStatus.CHECKED_IN],
+            invoice__isnull=True,
+        ).select_related('client', 'pet', 'package', 'staff__user').order_by('-start_at')
         data = [{
             'id': b.id,
+            'client_id': b.client_id,
             'client_name': b.client.full_name,
             'client_phone': b.client.phone,
+            'pet_id': b.pet_id,
             'pet_name': b.pet.name,
             'pet_species': b.pet.species,
+            'pet_breed': b.pet.breed,
             'pet_size': b.pet.size_class,
+            'pet_weight_kg': b.pet.weight_kg,
             'package_name': b.package.name if b.package else 'Dịch vụ lẻ',
+            'staff_name': (b.staff.user.full_name or b.staff.user.username) if (b.staff and b.staff.user) else None,
+            'status': b.status,
+            'status_display': b.get_status_display(),
             'start_at': b.start_at,
             'completed_at': b.completed_at,
-            'total_price': b.total_price,
-        } for b in qs[:30]]
+            'total_price': int(b.total_price or 0),
+        } for b in qs[:50]]
         return Response(data)
 
     @action(detail=True, methods=['post'])
@@ -184,3 +267,16 @@ class InvoiceViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Cr
             raise PermissionDenied()
         inv = services.void(self.get_object(), request.user, request.data.get('reason'))
         return Response(InvoiceSerializer(inv).data)
+
+    @action(detail=True, methods=['get'], url_path='pdf')
+    def download_pdf(self, request, pk=None):
+        inv = self.get_object()
+        serializer = self.get_serializer(inv)
+        from .pdf import generate_invoice_pdf
+        from django.http import HttpResponse
+        pdf_bytes = generate_invoice_pdf(serializer.data)
+        filename = f"Hoa_Don_{inv.invoice_no}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return response

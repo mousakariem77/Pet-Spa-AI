@@ -449,6 +449,11 @@ def check_in(booking, user, assignments=None):
         item.resource = res
         item.save(update_fields=['resource'])
     _move(booking, BookingStatus.CHECKED_IN, user, checked_in_at=timezone.now())
+    try:
+        from notifications.services import notify_booking_checked_in
+        notify_booking_checked_in(booking)
+    except Exception:
+        pass
     return booking
 
 
@@ -474,8 +479,12 @@ def complete(booking, user):
     _require_technician(booking, user)
     _move(booking, BookingStatus.COMPLETED, user, completed_at=timezone.now())
     create_invoice(booking)
-    notify(_front_desk_users(), 'booking_completed', 'Có thú đã làm xong, chờ thu tiền',
-           f'{booking.pet.name}', 'booking', booking.pk)
+    try:
+        from notifications.services import notify_booking_completed
+        notify_booking_completed(booking)
+    except Exception:
+        notify(_front_desk_users(), 'booking_completed', 'Có thú đã làm xong, chờ thu tiền',
+               f'{booking.pet.name}', 'booking', booking.pk)
     return booking
 
 
@@ -497,7 +506,7 @@ def check_out(booking, user):
 # ==============================================================================
 
 def create_walk_in(contact_name, phone='', pet_name='', pet_species='dog', service=None, package=None, client=None, pet=None, note=''):
-    """Lấy số thứ tự hàng đợi khách vãng lai (SPA-18)."""
+    """Lấy số thứ tự hàng đợi khách vãng lai."""
     today = timezone.localdate()
     # Tự động gán Client và Pet nếu tìm thấy
     if phone and not client:
@@ -540,7 +549,7 @@ def create_walk_in(contact_name, phone='', pet_name='', pet_species='dog', servi
 
 
 def call_walk_in(ticket, user):
-    """Lễ tân gọi số thứ tự tiếp theo (SPA-18)."""
+    """Lễ tân gọi số thứ tự tiếp theo."""
     if ticket.status == WalkInStatus.SERVED:
         raise Conflict('invalid_transition', 'Phiếu này đã được tiếp nhận.')
     if ticket.status == WalkInStatus.LEFT:
@@ -553,7 +562,7 @@ def call_walk_in(ticket, user):
 
 @transaction.atomic
 def convert_walk_in(ticket, user, staff_id=None, assignments=None):
-    """Chuyển đổi phiếu walk-in thành Booking và tiếp nhận vào bàn (SPA-18)."""
+    """Chuyển đổi phiếu walk-in thành Booking và tiếp nhận vào bàn."""
     ticket = WalkInTicket.objects.select_for_update().get(pk=ticket.pk)
     if ticket.status == WalkInStatus.SERVED:
         raise Conflict('invalid_transition', 'Phiếu này đã được tiếp nhận.')
@@ -643,7 +652,7 @@ def convert_walk_in(ticket, user, staff_id=None, assignments=None):
 
 
 def leave_walk_in(ticket, user, reason=''):
-    """Đánh dấu khách rời đi / hủy chờ (SPA-18)."""
+    """Đánh dấu khách rời đi / hủy chờ."""
     if ticket.status == WalkInStatus.SERVED:
         raise Conflict('invalid_transition', 'Phiếu này đã được tiếp nhận, không thể đánh dấu rời đi.')
     ticket.status = WalkInStatus.LEFT

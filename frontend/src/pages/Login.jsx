@@ -8,7 +8,7 @@ import {
   InfoCircleOutlined, KeyOutlined, LockOutlined, PhoneOutlined,
   SafetyCertificateOutlined, SendOutlined, ThunderboltOutlined, UserOutlined,
 } from '@ant-design/icons'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth.jsx'
 import { api, toFormErrors } from '../api.js'
 import Logo from '../components/Logo.jsx'
@@ -58,6 +58,8 @@ const DEMO_ACCOUNTS = [
 export default function Login() {
   const { user, login, register } = useAuth()
   const nav = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirectTarget = searchParams.get('redirect') || '/app/tong-quan'
   const [activeTab, setActiveTab] = useState('login')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -211,14 +213,14 @@ export default function Login() {
     }
   }
 
-  if (user) return <Navigate to="/app/tong-quan" replace />
+  if (user) return <Navigate to={redirectTarget} replace />
 
   const run = (fn, form) => async (values) => {
     setBusy(true)
     setError('')
     try {
       await fn(values)
-      nav('/app/tong-quan')
+      nav(redirectTarget)
     } catch (e) {
       const allFields = toFormErrors(e)
       const nonFieldErrors = e.fields?.non_field_errors || e.fields?.detail || []

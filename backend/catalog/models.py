@@ -35,6 +35,7 @@ class Specialty(models.Model):
     name_vi = models.CharField('Tên chuyên môn', max_length=100)
     species_scope = models.CharField('Áp dụng cho loài', max_length=10, choices=SpeciesScope.choices, default=SpeciesScope.BOTH)
     description = models.TextField('Mô tả chuyên môn', blank=True, default='')
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         verbose_name = 'Chuyên môn'
@@ -194,6 +195,8 @@ class ServiceContraindication(models.Model):
     health_tag = models.ForeignKey(HealthTag, on_delete=models.CASCADE, related_name='contraindications')
     severity = models.CharField(max_length=10, choices=Severity.choices, default=Severity.WARN)
     reason_vi = models.CharField('Lý do', max_length=250)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Chống chỉ định'

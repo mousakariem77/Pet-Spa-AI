@@ -406,6 +406,39 @@ class DashboardView(APIView):
 
         in_service_count = counts.get('checked_in', 0) + counts.get('in_progress', 0)
 
+        # Phân bổ lịch hẹn theo khung giờ trong ngày (08:00 -> 18:00)
+        hourly_dict = {h: {'hour': f"{h:02d}:00", 'count': 0, 'completed': 0, 'in_progress': 0, 'confirmed': 0, 'pending': 0} for h in range(8, 19)}
+        for b in today:
+            h = timezone.localtime(b.start_at).hour
+            if h in hourly_dict:
+                hourly_dict[h]['count'] += 1
+                if b.status == BookingStatus.COMPLETED:
+                    hourly_dict[h]['completed'] += 1
+                elif b.status in (BookingStatus.IN_PROGRESS, BookingStatus.CHECKED_IN):
+                    hourly_dict[h]['in_progress'] += 1
+                elif b.status == BookingStatus.CONFIRMED:
+                    hourly_dict[h]['confirmed'] += 1
+                elif b.status == BookingStatus.PENDING:
+                    hourly_dict[h]['pending'] += 1
+        hourly_distribution = [hourly_dict[h] for h in range(8, 19)]
+
+        # Phân bổ kênh tiếp nhận
+        online_count = today.filter(channel='online').count()
+        counter_count = today.filter(channel__in=['counter', 'desk', 'walk_in']).count()
+        other_channel = today.count() - online_count - counter_count
+
+        # Phân bổ hình thức thanh toán hôm nay
+        cash_paid = paid.filter(payment_method='cash')
+        transfer_paid = paid.filter(payment_method='transfer')
+        payment_distribution = {
+            'cash_count': cash_paid.count(),
+            'cash_total': sum(i.total for i in cash_paid),
+            'transfer_count': transfer_paid.count(),
+            'transfer_total': sum(i.total for i in transfer_paid),
+            'unpaid_count': unpaid.count(),
+            'unpaid_total': sum(i.total for i in unpaid),
+        }
+
         return Response({
             'date': day,
             'counts': counts,
@@ -420,6 +453,12 @@ class DashboardView(APIView):
             'staff_on_duty': staff_on_duty,
             'resources_summary': res_summary,
             'in_service_count': in_service_count,
+            'hourly_distribution': hourly_distribution,
+            'channel_distribution': {
+                'online': online_count,
+                'counter': counter_count + max(0, other_channel),
+            },
+            'payment_distribution': payment_distribution,
         })
 
 
@@ -430,6 +469,10 @@ class DashboardView(APIView):
 class WalkInTicketSerializer(serializers.ModelSerializer):
     queue_code = serializers.SerializerMethodField()
     client_name = serializers.CharField(source='client.full_name', read_only=True, default=None)
+    client_phone = serializers.CharField(source='client.phone', read_only=True, default=None)
+    pet_breed = serializers.CharField(source='pet.breed', read_only=True, default='')
+    pet_size_class = serializers.CharField(source='pet.size_class', read_only=True, default='')
+    pet_weight_kg = serializers.DecimalField(source='pet.weight_kg', max_digits=4, decimal_places=1, read_only=True, default=None)
     service_name = serializers.CharField(source='service.name', read_only=True, default=None)
     package_name = serializers.CharField(source='package.name', read_only=True, default=None)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
@@ -439,7 +482,8 @@ class WalkInTicketSerializer(serializers.ModelSerializer):
         model = WalkInTicket
         fields = [
             'id', 'date', 'queue_no', 'queue_code', 'contact_name', 'phone',
-            'client', 'client_name', 'pet', 'pet_name', 'pet_species',
+            'client', 'client_name', 'client_phone', 'pet', 'pet_name', 'pet_species',
+            'pet_breed', 'pet_size_class', 'pet_weight_kg',
             'service', 'service_name', 'package', 'package_name',
             'status', 'status_label', 'estimated_wait_minutes',
             'booking', 'booking_id', 'note',
@@ -480,13 +524,31 @@ class WalkInTicketViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         day_str = self.request.query_params.get('date')
-        target_day = parse_date(day_str) if day_str else timezone.localdate()
-        if not target_day:
-            target_day = timezone.localdate()
-        qs = self.queryset.filter(date=target_day)
+        if day_str == 'all':
+            qs = self.queryset.all()
+        else:
+            target_day = parse_date(day_str) if day_str else timezone.localdate()
+            if not target_day:
+                target_day = timezone.localdate()
+            qs = self.queryset.filter(date=target_day)
+
         st = self.request.query_params.get('status')
         if st:
             qs = qs.filter(status=st)
+
+        q = self.request.query_params.get('q', '').strip()
+        if q:
+            qs = qs.filter(
+                Q(contact_name__icontains=q) |
+                Q(phone__icontains=q) |
+                Q(pet_name__icontains=q) |
+                Q(note__icontains=q) |
+                Q(service__name__icontains=q) |
+                Q(package__name__icontains=q) |
+                Q(client__full_name__icontains=q) |
+                Q(client__phone__icontains=q) |
+                Q(pet__name__icontains=q)
+            )
         return qs.order_by('queue_no')
 
     def list(self, request, *args, **kwargs):
@@ -496,8 +558,12 @@ class WalkInTicketViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(qs, many=True)
 
         day_str = request.query_params.get('date')
-        target_day = parse_date(day_str) if day_str else timezone.localdate()
-        day_tickets = WalkInTicket.objects.filter(date=target_day)
+        if day_str == 'all':
+            day_tickets = WalkInTicket.objects.all()
+            target_day = timezone.localdate()
+        else:
+            target_day = parse_date(day_str) if day_str else timezone.localdate()
+            day_tickets = WalkInTicket.objects.filter(date=target_day)
 
         waiting = day_tickets.filter(status=WalkInStatus.WAITING).count()
         called = day_tickets.filter(status=WalkInStatus.CALLED).count()

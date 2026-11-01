@@ -454,7 +454,7 @@ export default function RebookReminders() {
     {
       title: 'Thao tác',
       key: 'action',
-      width: 120,
+      width: isCustomer ? 190 : 120,
       render: (_, r) => {
         const moreItems = []
 
@@ -521,17 +521,6 @@ export default function RebookReminders() {
           }
         }
 
-        if (isCustomer && ['suggested', 'approved', 'sent'].includes(r.status)) {
-          moreItems.push(
-            {
-              key: 'book_now',
-              label: 'Đặt lịch ngay',
-              icon: <CalendarOutlined style={{ color: '#0f8b8d' }} />,
-              onClick: () => nav('/app/lich-hen'),
-            }
-          )
-        }
-
         return (
           <Space size={6} onClick={(e) => e.stopPropagation()}>
             <Button
@@ -545,7 +534,21 @@ export default function RebookReminders() {
             >
               Chi tiết
             </Button>
-            {moreItems.length > 0 && (
+            {isCustomer && ['suggested', 'approved', 'sent'].includes(r.status) && (
+              <Button
+                size="small"
+                type="primary"
+                icon={<CalendarOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleBookNow(r)
+                }}
+                style={{ background: '#0f8b8d', borderColor: '#0f8b8d', borderRadius: 6, fontWeight: 600 }}
+              >
+                Đặt lịch ngay
+              </Button>
+            )}
+            {moreItems.length > 0 && !isCustomer && (
               <span onClick={(e) => e.stopPropagation()}>
                 <Dropdown
                   menu={{ items: moreItems }}
@@ -651,7 +654,7 @@ export default function RebookReminders() {
         <Col span={12} sm={6}>
           <Card size="small" style={{ borderRadius: 8 }}>
             <Statistic
-              title="Tổng lượt nhắc"
+              title={isCustomer ? 'Lời nhắc cho bé' : 'Tổng lượt nhắc'}
               value={counts.all}
               prefix={<BellOutlined style={{ color: '#0f8b8d' }} />}
             />
@@ -660,8 +663,8 @@ export default function RebookReminders() {
         <Col span={12} sm={6}>
           <Card size="small" style={{ borderRadius: 8 }}>
             <Statistic
-              title="Chờ duyệt gửi"
-              value={counts.suggested}
+              title={isCustomer ? 'Cần đặt lịch lại' : 'Chờ duyệt gửi'}
+              value={isCustomer ? reminders.filter((r) => ['suggested', 'approved', 'sent'].includes(r.status)).length : counts.suggested}
               valueStyle={{ color: '#d97706' }}
               prefix={<ClockCircleOutlined />}
             />
@@ -680,7 +683,7 @@ export default function RebookReminders() {
         <Col span={12} sm={6}>
           <Card size="small" style={{ borderRadius: 8 }}>
             <Statistic
-              title="Khách đã đặt lại"
+              title={isCustomer ? 'Đã đặt lịch hẹn' : 'Khách đã đặt lại'}
               value={counts.booked}
               valueStyle={{ color: '#16a34a' }}
               prefix={<CheckCircleOutlined />}
@@ -707,7 +710,11 @@ export default function RebookReminders() {
               placeholder="Lọc theo trạng thái"
               value={statusFilter}
               onChange={setStatusFilter}
-              options={[
+              options={isCustomer ? [
+                { value: '', label: 'Tất cả trạng thái' },
+                { value: 'sent', label: 'Cần đặt lịch hẹn (Sent)' },
+                { value: 'booked', label: 'Đã đặt lại lịch (Booked)' },
+              ] : [
                 { value: '', label: 'Tất cả trạng thái' },
                 { value: 'suggested', label: 'Chờ duyệt (Suggested)' },
                 { value: 'approved', label: 'Đã duyệt (Approved)' },
@@ -817,6 +824,16 @@ export default function RebookReminders() {
                 Đặt lịch hẹn
               </Button>
             )}
+            {isCustomer && ['suggested', 'approved', 'sent'].includes(detailReminder?.status) && (
+              <Button
+                type="primary"
+                icon={<CalendarOutlined />}
+                onClick={() => handleBookNow(detailReminder)}
+                style={{ background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600 }}
+              >
+                Đặt lịch ngay
+              </Button>
+            )}
           </Space>
         }
       >
@@ -841,11 +858,13 @@ export default function RebookReminders() {
                 </Space>
               </Descriptions.Item>
 
-              <Descriptions.Item label="Chủ nuôi">
-                <Typography.Link onClick={() => { setDetailReminder(null); nav(`/app/khach-hang?q=${detailReminder.client_name}`) }}>
-                  👤 <strong>{detailReminder.client_name || 'Khách vãng lai'}</strong> {detailReminder.client_phone ? `(${detailReminder.client_phone})` : ''}
-                </Typography.Link>
-              </Descriptions.Item>
+              {!isCustomer && (
+                <Descriptions.Item label="Chủ nuôi">
+                  <Typography.Link onClick={() => { setDetailReminder(null); nav(`/app/khach-hang?q=${detailReminder.client_name}`) }}>
+                    👤 <strong>{detailReminder.client_name || 'Khách vãng lai'}</strong> {detailReminder.client_phone ? `(${detailReminder.client_phone})` : ''}
+                  </Typography.Link>
+                </Descriptions.Item>
+              )}
 
               <Descriptions.Item label="Trạng thái">
                 <Tag color={STATUS_TAGS[detailReminder.status]?.color}>

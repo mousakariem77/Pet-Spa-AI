@@ -70,6 +70,14 @@ class ClientSerializer(serializers.ModelSerializer):
         from accounts.serializers import normalize_phone_number
         return normalize_phone_number(value)
 
+    def update(self, instance, validated_data):
+        is_active = validated_data.get('is_active')
+        instance = super().update(instance, validated_data)
+        if is_active is not None and instance.user:
+            instance.user.is_active = is_active
+            instance.user.save(update_fields=['is_active'])
+        return instance
+
 
 class ClientSelfSerializer(serializers.ModelSerializer):
     """Khách xem/sửa hồ sơ của chính mình: không thấy ghi chú nội bộ."""

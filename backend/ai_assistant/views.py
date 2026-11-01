@@ -36,12 +36,14 @@ class AiSuggestionSerializer(serializers.ModelSerializer):
     def get_package_info(self, s):
         if not s.package:
             return None
+        items = list(s.package.items.select_related('service'))
         return {
             'id': s.package.id,
             'name': s.package.name,
             'description': s.package.description,
-            'items': [it.service.name for it in s.package.items.select_related('service')],
-            'prices': s.package.prices.values('size_class', 'price'),
+            'items': [it.service.name for it in items],
+            'duration_minutes': sum(it.service.duration_minutes for it in items),
+            'prices': list(s.package.prices.values('size_class', 'price')),
         }
 
 
@@ -51,7 +53,7 @@ class RebookRuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = RebookRule
         fields = ['id', 'package', 'package_name', 'coat_type', 'species',
-                  'interval_days', 'overdue_days', 'note_vi']
+                  'interval_days', 'overdue_days', 'note_vi', 'created_at', 'updated_at']
 
 
 class RebookReminderSerializer(serializers.ModelSerializer):
@@ -158,7 +160,7 @@ class KnowledgeDocSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = KnowledgeDoc
-        fields = ['id', 'title', 'doc_type', 'file', 'text_content', 'content', 'sections', 'version', 'is_active', 'created_at', 'chunks']
+        fields = ['id', 'title', 'doc_type', 'file', 'text_content', 'content', 'sections', 'version', 'is_active', 'created_at', 'updated_at', 'chunks']
 
     def to_internal_value(self, data):
         data = data.copy() if hasattr(data, 'copy') else dict(data)
@@ -197,7 +199,7 @@ class ServiceContraindicationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ServiceContraindication
-        fields = ['id', 'service', 'service_name', 'health_tag', 'health_tag_name', 'severity', 'reason_vi']
+        fields = ['id', 'service', 'service_name', 'health_tag', 'health_tag_name', 'severity', 'reason_vi', 'created_at', 'updated_at']
 
 
 # ---------------------------------------------------------------- VIEWS
@@ -291,7 +293,7 @@ class RebookReminderViewSet(viewsets.ModelViewSet):
 
         qs = RebookReminder.objects.select_related('client', 'pet', 'last_booking__package', 'rule').order_by('-due_date', '-id')
         if u.role == Role.CUSTOMER:
-            return qs.filter(client__user=u, status=RebookReminder.Status.SENT)
+            return qs.filter(client__user=u, status__in=[RebookReminder.Status.SENT, RebookReminder.Status.BOOKED, RebookReminder.Status.APPROVED])
         st = self.request.query_params.get('status')
         if st:
             qs = qs.filter(status=st)

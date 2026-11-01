@@ -37,8 +37,8 @@ class NotificationViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, views
                 qs = qs.filter(Q(kind__startswith='booking') | Q(ref_type='booking'))
             elif kind == 'invoice':
                 qs = qs.filter(Q(kind__startswith='invoice') | Q(ref_type='invoice'))
-            elif kind == 'reminder':
-                qs = qs.filter(Q(kind__startswith='rebook') | Q(ref_type='reminder'))
+            elif kind in ('reminder', 'rebook', 'rebook_reminder'):
+                qs = qs.filter(Q(kind__startswith='rebook') | Q(kind__startswith='reminder') | Q(ref_type__in=['reminder', 'rebook', 'rebook_reminder']))
             elif kind == 'staff':
                 qs = qs.filter(Q(kind__startswith='staff') | Q(ref_type='staff'))
             elif kind == 'system':

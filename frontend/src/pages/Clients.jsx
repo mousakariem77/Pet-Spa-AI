@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, App, Avatar, Badge, Button, Card, Col, DatePicker, Descriptions,
   Divider, Drawer, Dropdown, Empty, Form, Input, Modal, Popconfirm,
-  Row, Select, Space, Switch, Table, Tag, Tooltip,
+  Row, Segmented, Select, Space, Switch, Table, Tag, Tooltip,
   Typography,
 } from 'antd'
 import {
   CalendarOutlined, DeleteOutlined, DollarOutlined, EditOutlined,
+  EyeInvisibleOutlined,
   ExclamationCircleOutlined, EyeOutlined, HistoryOutlined, IdcardOutlined,
   LockOutlined, MedicineBoxOutlined, MoreOutlined, PlusOutlined,
   ReloadOutlined, RobotOutlined, ThunderboltOutlined, UserOutlined,
@@ -44,6 +45,10 @@ export default function Clients() {
   const [source, setSource] = useState(undefined)
   const [statusFilter, setStatusFilter] = useState(undefined)
   const [ordering, setOrdering] = useState('-created_at')
+  const [clientActiveFilter, setClientActiveFilter] = useState('all') // 'all' | 'active' | 'hidden'
+  const [clientCounts, setClientCounts] = useState({ all: 0, active: 0, hidden: 0 })
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null) // { target, type: 'client' | 'pet' }
+  const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const hasFilter = Boolean(q || searchInput || source || statusFilter || ordering !== '-created_at')
@@ -85,16 +90,25 @@ export default function Clients() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = { page, page_size: pageSize, q }
+      const params = { page, page_size: pageSize, q, include_inactive: '1' }
       if (source) params.source = source
       if (statusFilter) params.status = statusFilter
       if (ordering) params.ordering = ordering
-      const res = await api('/clients', { params })
+      if (clientActiveFilter !== 'all') params.active_status = clientActiveFilter
+      const [res, countsRes] = await Promise.all([
+        api('/clients', { params }),
+        api('/clients/counts').catch(() => null),
+      ])
       setData(res)
+      if (countsRes) {
+        setClientCounts(countsRes)
+      } else if (res?.count != null) {
+        setClientCounts((prev) => ({ ...prev, all: res.count }))
+      }
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, q, source, statusFilter, ordering])
+  }, [page, pageSize, q, source, statusFilter, ordering, clientActiveFilter])
 
   useEffect(() => {
     load()
@@ -160,7 +174,7 @@ export default function Clients() {
     setDetailClient(client)
     setLoadingPets(true)
     try {
-      const res = await api('/pets', { params: { client: client.id } })
+      const res = await api('/pets', { params: { client: client.id, include_inactive: '1' } })
       const list = unwrap(res)
       setClientPets(list.length > 0 ? list : client.pets || [])
     } catch {
@@ -204,21 +218,63 @@ export default function Clients() {
     }
   }
 
-  // Ẩn khách
-  const hide = async (id) => {
+  // Ẩn / Hiện khách hàng
+  const setClientActive = async (client, isActive) => {
     try {
-      await api(`/clients/${id}`, { method: 'DELETE' })
-      message.success('Đã ẩn khách hàng thành công.')
+      await api(`/clients/${client.id}`, { method: 'PATCH', body: { is_active: isActive } })
+      message.success(isActive ? 'Đã hiển thị lại khách hàng thành công.' : 'Đã ẩn khách hàng thành công.')
       load()
-      if (detailClient?.id === id) {
-        setDetailClient(null)
+      if (detailClient?.id === client.id) {
+        setDetailClient({ ...detailClient, is_active: isActive })
       }
     } catch (e) {
-      message.error(e.message || 'Lỗi khi ẩn khách hàng.')
+      message.error(e.message || (isActive ? 'Không thể hiển thị lại khách hàng.' : 'Không thể ẩn khách hàng.'))
     }
   }
 
-  // Thêm / sửa / ẩn thú cưng (thao tác ngay trong hồ sơ khách)
+  // Ẩn / Hiện thú cưng
+  const setPetActive = async (pet, isActive) => {
+    try {
+      await api(`/pets/${pet.id}`, { method: 'PATCH', body: { is_active: isActive } })
+      message.success(isActive ? 'Đã hiển thị lại hồ sơ thú cưng.' : 'Đã ẩn hồ sơ thú cưng.')
+      refreshAfterPetChange()
+    } catch (e) {
+      message.error(e.message || (isActive ? 'Không thể hiển thị lại thú cưng.' : 'Không thể ẩn thú cưng.'))
+    }
+  }
+
+  // Xóa khách hàng / thú cưng (Chỉ khi đã ẩn mới được xóa)
+  const openDeleteConfirm = (target, type = 'client') => {
+    if (target.is_active) {
+      message.warning(`Cần ẩn ${type === 'client' ? 'khách hàng' : 'thú cưng'} này trước khi có thể xóa vĩnh viễn!`)
+      return
+    }
+    setDeleteConfirmTarget({ target, type })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmTarget) return
+    const { target, type } = deleteConfirmTarget
+    setDeleteConfirmBusy(true)
+    try {
+      const endpoint = type === 'client' ? `/clients/${target.id}` : `/pets/${target.id}`
+      await api(endpoint, { method: 'DELETE' })
+      message.success(`Đã xóa vĩnh viễn ${type === 'client' ? 'khách hàng' : 'thú cưng'} thành công!`)
+      setDeleteConfirmTarget(null)
+      if (type === 'client') {
+        if (detailClient?.id === target.id) setDetailClient(null)
+        load()
+      } else {
+        refreshAfterPetChange()
+      }
+    } catch (e) {
+      message.error(e.message || `Lỗi khi xóa ${type === 'client' ? 'khách hàng' : 'thú cưng'}`)
+    } finally {
+      setDeleteConfirmBusy(false)
+    }
+  }
+
+  // Thêm / sửa thú cưng
   const handleOpenAddPet = (client) => {
     setPetOwner(client)
     setPetModal({})
@@ -235,19 +291,9 @@ export default function Clients() {
       try {
         const fresh = await api(`/clients/${detailClient.id}`)
         setDetailClient(fresh)
-        const res = await api('/pets', { params: { client: detailClient.id } })
+        const res = await api('/pets', { params: { client: detailClient.id, include_inactive: '1' } })
         setClientPets(unwrap(res))
       } catch { /* giữ nguyên dữ liệu cũ */ }
-    }
-  }
-
-  const hidePet = async (id) => {
-    try {
-      await api(`/pets/${id}`, { method: 'DELETE' })
-      message.success('Đã ẩn hồ sơ thú.')
-      refreshAfterPetChange()
-    } catch (e) {
-      message.error(e.message || 'Lỗi khi ẩn hồ sơ thú.')
     }
   }
 
@@ -514,6 +560,19 @@ export default function Clients() {
       },
     },
     {
+      title: 'Trạng thái',
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 130,
+      render: (active) => (
+        active ? (
+          <Tag color="success">Đang hoạt động</Tag>
+        ) : (
+          <Tag color="default">Đã ẩn</Tag>
+        )
+      ),
+    },
+    {
       title: 'Thao tác',
       key: 'actions',
       width: 95,
@@ -562,24 +621,48 @@ export default function Clients() {
           {
             type: 'divider',
           },
-          {
-            key: 'delete',
-            label: 'Ẩn khách hàng',
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: () => {
-              modal.confirm({
-                title: 'Ẩn khách hàng?',
-                icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-                content: `Bạn có chắc chắn muốn ẩn khách hàng ${r.full_name} (${r.phone}) khỏi danh sách không?`,
-                okText: 'Ẩn',
-                okType: 'danger',
-                cancelText: 'Hủy',
-                centered: true,
-                onOk: () => hide(r.id),
-              })
-            },
-          },
+          ...(r.is_active !== false
+            ? [
+                {
+                  key: 'hide',
+                  label: 'Ẩn khách hàng',
+                  icon: <EyeInvisibleOutlined style={{ color: '#d97706' }} />,
+                  onClick: () => {
+                    modal.confirm({
+                      title: 'Ẩn khách hàng?',
+                      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+                      content: `Bạn có chắc chắn muốn ẩn khách hàng ${r.full_name} (${r.phone}) khỏi danh sách không? Khách hàng sẽ được chuyển vào mục Đã ẩn.`,
+                      okText: 'Ẩn khách hàng',
+                      okType: 'danger',
+                      cancelText: 'Hủy',
+                      centered: true,
+                      onOk: () => setClientActive(r, false),
+                    })
+                  },
+                },
+                {
+                  key: 'delete-disabled',
+                  label: 'Xóa vĩnh viễn',
+                  icon: <DeleteOutlined />,
+                  disabled: true,
+                  title: 'Cần ẩn khách hàng trước khi xóa',
+                },
+              ]
+            : [
+                {
+                  key: 'unhide',
+                  label: 'Hiển thị lại',
+                  icon: <EyeOutlined style={{ color: '#0f8b8d' }} />,
+                  onClick: () => setClientActive(r, true),
+                },
+                {
+                  key: 'delete',
+                  label: 'Xóa vĩnh viễn',
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  onClick: () => openDeleteConfirm(r, 'client'),
+                },
+              ]),
         ]
 
         return (
@@ -595,6 +678,23 @@ export default function Clients() {
             >
               Sửa
             </Button>
+            {r.is_active !== false ? (
+              <Tooltip title="Cần ẩn khách hàng trước khi có thể xóa">
+                <span>
+                  <Button size="small" danger disabled icon={<DeleteOutlined />} style={{ borderRadius: 6 }} />
+                </span>
+              </Tooltip>
+            ) : (
+              <Tooltip title="Xóa vĩnh viễn khách hàng này">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  style={{ borderRadius: 6 }}
+                  onClick={() => openDeleteConfirm(r, 'client')}
+                />
+              </Tooltip>
+            )}
             <span onClick={(e) => e.stopPropagation()}>
               <Dropdown
                 menu={{ items: moreItems }}
@@ -715,6 +815,19 @@ export default function Clients() {
             ]}
           />
 
+          <Segmented
+            value={clientActiveFilter}
+            onChange={(val) => {
+              setClientActiveFilter(val)
+              setPage(1)
+            }}
+            options={[
+              { label: `Tất cả (${clientCounts.all || data.count || 0})`, value: 'all' },
+              { label: `Đang hoạt động (${clientCounts.active || 0})`, value: 'active' },
+              { label: `Đã ẩn (${clientCounts.hidden || 0})`, value: 'hidden' },
+            ]}
+          />
+
           {hasFilter && (
             <Button
               icon={<ReloadOutlined />}
@@ -728,6 +841,16 @@ export default function Clients() {
 
         <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
       </div>
+
+      {clientActiveFilter === 'hidden' && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Danh sách khách hàng đang bị ẩn"
+          description="Các khách hàng này đã bị ẩn khỏi danh sách gợi ý đặt lịch và tiếp nhận. Bạn có thể mở chi tiết để 'Hiện lại', hoặc thực hiện xóa vĩnh viễn nếu khách hàng chưa có dữ liệu giao dịch liên kết."
+        />
+      )}
 
       <Table
         rowKey="id"
@@ -754,10 +877,22 @@ export default function Clients() {
       {/* ===== DRAWER XEM CHI TIẾT KHÁCH HÀNG & THÚ CƯNG ===== */}
       <Drawer
         title={
-          <Space>
-            <UserOutlined style={{ color: '#0f8b8d' }} />
-            <span>Hồ sơ khách: {detailClient?.full_name}</span>
-          </Space>
+          detailClient ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <UserOutlined style={{ color: '#0f8b8d', fontSize: 20 }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Text strong style={{ fontSize: 16 }}>Hồ sơ khách: {detailClient.full_name}</Text>
+                  {detailClient.is_active ? (
+                    <Tag color="success">Đang hoạt động</Tag>
+                  ) : (
+                    <Tag color="default">Đang tạm ẩn</Tag>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: '#64748b' }}>📞 {detailClient.phone}</div>
+              </div>
+            </div>
+          ) : null
         }
         open={!!detailClient}
         onClose={() => setDetailClient(null)}
@@ -775,6 +910,83 @@ export default function Clients() {
       >
         {detailClient && (
           <div>
+            {/* Thanh công cụ thao tác nhanh cho Khách hàng */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 14px',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                marginBottom: 16,
+                flexWrap: 'wrap',
+                gap: 8,
+              }}
+            >
+              <Space size={8} wrap>
+                <Button
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    const c = detailClient
+                    setDetailClient(null)
+                    setEditing(c)
+                  }}
+                >
+                  Sửa hồ sơ khách
+                </Button>
+
+                {detailClient.is_active ? (
+                  <Button
+                    icon={<EyeInvisibleOutlined />}
+                    style={{ color: '#d97706', borderColor: '#fcd34d' }}
+                    onClick={() => {
+                      modal.confirm({
+                        title: 'Ẩn khách hàng?',
+                        icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+                        content: `Bạn có chắc chắn muốn ẩn khách hàng ${detailClient.full_name} (${detailClient.phone}) khỏi danh sách không?`,
+                        okText: 'Ẩn khách hàng',
+                        okType: 'danger',
+                        cancelText: 'Hủy',
+                        centered: true,
+                        onOk: () => setClientActive(detailClient, false),
+                      })
+                    }}
+                  >
+                    Ẩn khách hàng
+                  </Button>
+                ) : (
+                  <Button
+                    type="primary"
+                    icon={<EyeOutlined />}
+                    style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                    onClick={() => setClientActive(detailClient, true)}
+                  >
+                    Hiển thị lại khách hàng
+                  </Button>
+                )}
+
+                {detailClient.is_active ? (
+                  <Tooltip title="Cần ẩn khách hàng trước khi có thể xóa">
+                    <span>
+                      <Button danger disabled icon={<DeleteOutlined />}>
+                        Xóa khách hàng
+                      </Button>
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => openDeleteConfirm(detailClient, 'client')}
+                  >
+                    Xóa khách hàng
+                  </Button>
+                )}
+              </Space>
+            </div>
+
             {/* Thẻ chỉ số CRM Khách hàng */}
             <div
               style={{
@@ -966,9 +1178,45 @@ export default function Clients() {
                       </Button>
                       <Button size="small" icon={<EditOutlined />} onClick={() => handleOpenEditPet(p)}>Sửa</Button>
                       <Button size="small" icon={<MedicineBoxOutlined />} onClick={() => setVaccPet(p)}>Tiêm phòng</Button>
-                      <Popconfirm title="Ẩn hồ sơ thú này?" okText="Ẩn" cancelText="Hủy" onConfirm={() => hidePet(p.id)}>
-                        <Button size="small" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>
+                      {p.is_active !== false ? (
+                        <Popconfirm
+                          title="Ẩn hồ sơ thú cưng này?"
+                          description="Thú cưng sẽ không còn dùng để đặt lịch mới; lịch sử cũ vẫn được giữ."
+                          okText="Ẩn thú cưng"
+                          cancelText="Hủy"
+                          onConfirm={() => setPetActive(p, false)}
+                        >
+                          <Button size="small" icon={<EyeInvisibleOutlined />} style={{ color: '#d97706', borderColor: '#fcd34d' }}>
+                            Ẩn
+                          </Button>
+                        </Popconfirm>
+                      ) : (
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<EyeOutlined />}
+                          style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                          onClick={() => setPetActive(p, true)}
+                        >
+                          Hiện lại
+                        </Button>
+                      )}
+                      {p.is_active !== false ? (
+                        <Tooltip title="Cần ẩn thú cưng trước khi xóa vĩnh viễn">
+                          <span>
+                            <Button size="small" danger disabled icon={<DeleteOutlined />} />
+                          </span>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip title="Xóa vĩnh viễn thú cưng này">
+                          <Button
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => openDeleteConfirm(p, 'pet')}
+                          />
+                        </Tooltip>
+                      )}
                     </Space>
                   </Card>
                 ))}
@@ -1156,6 +1404,51 @@ export default function Clients() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* ===== MODAL XÁC NHẬN XÓA KHÁCH HÀNG / THÚ CƯNG ===== */}
+      <Modal
+        open={!!deleteConfirmTarget}
+        onCancel={() => !deleteConfirmBusy && setDeleteConfirmTarget(null)}
+        onOk={handleConfirmDelete}
+        confirmLoading={deleteConfirmBusy}
+        okText="Xác nhận xóa vĩnh viễn"
+        cancelText="Hủy bỏ"
+        okButtonProps={{ danger: true }}
+        centered
+        title={
+          <Space style={{ color: '#ff4d4f' }}>
+            <ExclamationCircleOutlined style={{ fontSize: 20 }} />
+            <span style={{ fontWeight: 600 }}>
+              Xác nhận xóa vĩnh viễn {deleteConfirmTarget?.type === 'client' ? 'khách hàng' : 'thú cưng'}
+            </span>
+          </Space>
+        }
+      >
+        {deleteConfirmTarget && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 14 }}>
+              Bạn có chắc chắn muốn xóa vĩnh viễn{' '}
+              {deleteConfirmTarget.type === 'client' ? 'khách hàng' : 'thú cưng'}{' '}
+              <Text strong style={{ color: '#0f8b8d', fontSize: 15 }}>
+                "{deleteConfirmTarget.target.full_name || deleteConfirmTarget.target.name}"
+              </Text>
+              {deleteConfirmTarget.target.phone ? ` (SĐT: ${deleteConfirmTarget.target.phone})` : ''}?
+            </p>
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="Lưu ý thao tác không thể hoàn tác"
+              description={
+                deleteConfirmTarget.type === 'client'
+                  ? "Hành động này sẽ xóa dữ liệu khách hàng khỏi hệ thống. Nếu khách hàng đã từng có lịch hẹn hoặc hóa đơn, hệ thống sẽ ngăn chặn việc xóa để đảm bảo toàn vẹn dữ liệu. Khi đó bạn nên tiếp tục giữ ở trạng thái 'Đã ẩn'."
+                  : "Hành động này sẽ xóa hoàn toàn hồ sơ thú cưng khỏi hệ thống nếu chưa có lịch hẹn liên kết."
+              }
+            />
+          </div>
+        )}
+      </Modal>
+
     </>
   )
 }

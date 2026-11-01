@@ -1,6 +1,8 @@
 from django.db import transaction
+from django.db.models import ProtectedError
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -35,9 +37,14 @@ class ServiceViewSet(viewsets.ModelViewSet):
         return qs if _is_manager(self.request) else qs.filter(is_active=True)
 
     def perform_destroy(self, instance):
-        # Xóa mềm: dịch vụ có thể đã nằm trong lịch/gói
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa dịch vụ đã bị ẩn. Vui lòng ẩn dịch vụ trước khi xóa.'})
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                'detail': 'Không thể xóa vĩnh viễn dịch vụ này do đã có dữ liệu liên quan (lịch hẹn hoặc gói combo). Hãy giữ ở trạng thái ẩn để bảo toàn lịch sử giao dịch.'
+            })
 
     @action(detail=True, methods=['put'], url_path='prices')
     @transaction.atomic
@@ -61,8 +68,14 @@ class PackageViewSet(viewsets.ModelViewSet):
         return qs if _is_manager(self.request) else qs.filter(is_active=True)
 
     def perform_destroy(self, instance):
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa gói combo đã bị ẩn. Vui lòng ẩn gói combo trước khi xóa.'})
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                'detail': 'Không thể xóa vĩnh viễn gói combo này do đã có dữ liệu liên quan (lịch hẹn). Hãy giữ ở trạng thái ẩn để bảo toàn lịch sử giao dịch.'
+            })
 
     @action(detail=True, methods=['put'], url_path='prices')
     @transaction.atomic
@@ -97,9 +110,22 @@ class SizeBandViewSet(viewsets.ModelViewSet):
 
 
 class SpecialtyViewSet(viewsets.ModelViewSet):
-    queryset = Specialty.objects.all()
     serializer_class = SpecialtySerializer
     pagination_class = None
+
+    def get_queryset(self):
+        qs = Specialty.objects.all()
+        if self.action == 'list' and self.request.query_params.get('include_inactive') != '1':
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def perform_destroy(self, instance):
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa chuyên môn đã bị ẩn. Vui lòng ẩn chuyên môn trước khi xóa.'})
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({'detail': 'Không thể xóa vĩnh viễn chuyên môn này do đang có dịch vụ hoặc nhân sự liên kết. Hãy giữ ở trạng thái ẩn.'})
 
     def get_permissions(self):
         return [IsStaffRole()] if self.request.method in SAFE else [IsManager()]

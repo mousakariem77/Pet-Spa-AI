@@ -114,7 +114,7 @@ class WalkInStatus(models.TextChoices):
 
 
 class WalkInTicket(models.Model):
-    """Phiếu hàng đợi khách vãng lai tại quầy (SPA-18)."""
+    """Phiếu hàng đợi khách vãng lai tại quầy."""
     date = models.DateField(default=timezone.localdate, db_index=True)
     queue_no = models.PositiveIntegerField('Số thứ tự', db_index=True)
     client = models.ForeignKey('customers.Client', null=True, blank=True, on_delete=models.SET_NULL, related_name='walk_in_tickets')

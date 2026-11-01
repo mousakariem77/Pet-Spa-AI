@@ -8,6 +8,7 @@ import {
   ClockCircleOutlined,
   EnvironmentOutlined,
   LoginOutlined,
+  MailOutlined,
   PhoneOutlined,
   RightOutlined,
   RobotOutlined,
@@ -41,7 +42,6 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    document.title = 'Pet Spa AI - Dịch Vụ Spa Thú Cưng Đẳng Cấp & Đặt Lịch Thông Minh'
     Promise.all([
       api('/spa').catch(() => null),
       api('/packages').catch(() => []),
@@ -49,11 +49,37 @@ export default function LandingPage() {
     ])
       .then(([s, p, sv]) => {
         setSpa(s)
-        setPackages(unwrap(p))
-        setServices(unwrap(sv))
+        const rawPackages = unwrap(p) || []
+        const rawServices = unwrap(sv) || []
+        // Chỉ lấy các gói và dịch vụ ĐANG HOẠT ĐỘNG (không bị ẩn / xóa)
+        setPackages(rawPackages.filter((pkg) => pkg.is_active !== false))
+        setServices(rawServices.filter((svc) => svc.is_active !== false))
       })
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    document.title = `${spa?.name || 'Pet Spa AI'} - Dịch Vụ Spa Thú Cưng Đẳng Cấp & Đặt Lịch Thông Minh`
+  }, [spa])
+
+  // Đặt lịch chung (chuyển sang trang đặt lịch hoặc đăng nhập kèm redirect)
+  const handleBookingClick = () => {
+    if (user) {
+      nav('/app/lich-hen')
+    } else {
+      nav(`/dang-nhap?redirect=${encodeURIComponent('/app/lich-hen')}`)
+    }
+  }
+
+  // Khi bấm "Chọn đặt gói này", chuyển sang /app/lich-hen kèm đúng gói đã chọn
+  const handleSelectPackage = (pkg) => {
+    const targetUrl = `/app/lich-hen?package=${pkg.id}`
+    if (user) {
+      nav(targetUrl)
+    } else {
+      nav(`/dang-nhap?redirect=${encodeURIComponent(targetUrl)}`)
+    }
+  }
 
   const handleActionClick = () => {
     if (user) {
@@ -63,7 +89,15 @@ export default function LandingPage() {
     }
   }
 
-  const openDays = (spa?.open_weekdays || []).map((d) => DAYS_VN[d]).join(', ')
+  // Định dạng ngày mở cửa thân thiện
+  const formatOpenDays = () => {
+    const days = spa?.open_weekdays
+    if (!days || !days.length) return 'Thứ Hai – Chủ nhật'
+    if (days.length === 7) return 'Tất cả các ngày trong tuần (Thứ Hai – Chủ nhật)'
+    return days.map((d) => DAYS_VN[d]).join(', ')
+  }
+
+  const openDays = formatOpenDays()
 
   return (
     <div className="landing-page">
@@ -88,6 +122,9 @@ export default function LandingPage() {
                 <Tag color="cyan" style={{ padding: '4px 10px', fontSize: 13, borderRadius: 20 }}>
                   <UserOutlined /> {user.full_name || user.username} ({ROLE_LABEL[user.role]})
                 </Tag>
+                <Button shape="round" icon={<CalendarOutlined />} onClick={handleBookingClick}>
+                  Đặt lịch
+                </Button>
                 <Button type="primary" shape="round" icon={<RightOutlined />} onClick={() => nav('/app/tong-quan')}>
                   Vào hệ thống
                 </Button>
@@ -97,7 +134,7 @@ export default function LandingPage() {
                 <Button type="text" icon={<LoginOutlined />} onClick={() => nav('/dang-nhap')}>
                   Đăng nhập
                 </Button>
-                <Button type="primary" shape="round" icon={<CalendarOutlined />} onClick={() => nav('/dang-nhap')}>
+                <Button type="primary" shape="round" icon={<CalendarOutlined />} onClick={handleBookingClick}>
                   Đặt lịch ngay
                 </Button>
               </Space>
@@ -130,10 +167,10 @@ export default function LandingPage() {
                   size="large"
                   shape="round"
                   icon={<CalendarOutlined />}
-                  onClick={handleActionClick}
+                  onClick={handleBookingClick}
                   style={{ height: 50, padding: '0 32px', fontSize: 16 }}
                 >
-                  {user ? 'Vào bảng điều khiển' : 'Đặt lịch hẹn ngay'}
+                  Đặt lịch hẹn ngay
                 </Button>
                 <Button
                   size="large"
@@ -184,7 +221,7 @@ export default function LandingPage() {
                 <div className="hero-floating-card bottom-card">
                   <StarFilled style={{ color: '#f59e0b', fontSize: 24 }} />
                   <div>
-                    <Text strong>Spa Thú Y Lông Mượt</Text>
+                    <Text strong>{spa?.name || 'Spa Thú Y Lông Mượt'}</Text>
                     <div><Text type="secondary" style={{ fontSize: 12 }}>Chuẩn tiện nghi bồn sục & bàn cắt</Text></div>
                   </div>
                 </div>
@@ -308,19 +345,44 @@ export default function LandingPage() {
           {loading ? (
             <div style={{ textAlign: 'center', padding: '60px 0' }}><Spin size="large" /></div>
           ) : packages.length === 0 ? (
-            <Empty description="Chưa có gói dịch vụ nào." />
+            <div style={{ textAlign: 'center', padding: '48px 24px', background: '#f8fafc', borderRadius: 16 }}>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <div>
+                    <Text strong style={{ fontSize: 16, color: '#334155' }}>
+                      Các gói combo đang được cập nhật bảng giá ưu đãi mới
+                    </Text>
+                    <div style={{ color: '#64748b', fontSize: 13, marginTop: 6 }}>
+                      Quý khách vui lòng chọn các dịch vụ lẻ bên dưới hoặc liên hệ Hotline để được tư vấn gói phù hợp cho bé!
+                    </div>
+                  </div>
+                }
+              />
+            </div>
           ) : (
             <Row gutter={[24, 24]} style={{ marginTop: 40 }}>
               {packages.map((pkg, idx) => {
-                const minPrice = pkg.prices ? Math.min(...Object.values(pkg.prices)) : 0
+                const pricesArr = pkg.prices ? Object.values(pkg.prices).filter((v) => typeof v === 'number' && v > 0) : []
+                const minPrice = pricesArr.length > 0 ? Math.min(...pricesArr) : null
                 const isHighlight = idx === 0 || pkg.code === 'vip'
+                const validItems = (pkg.items || []).filter((it) => it.is_active !== false && it.service_name)
+
                 return (
                   <Col xs={24} md={12} lg={8} key={pkg.id}>
                     <Card
                       className={`package-card ${isHighlight ? 'highlight-package' : ''}`}
                       bordered={false}
+                      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
                     >
                       {isHighlight && <div className="package-ribbon">Phổ biến nhất</div>}
+
+                      <div style={{ marginBottom: 6 }}>
+                        {pkg.species_scope === 'dog' && <Tag color="blue">Dành cho Chó</Tag>}
+                        {pkg.species_scope === 'cat' && <Tag color="purple">Dành cho Mèo</Tag>}
+                        {pkg.species_scope === 'both' && <Tag color="cyan">Chó & Mèo</Tag>}
+                      </div>
+
                       <Title level={3} style={{ marginBottom: 4 }}>{pkg.name}</Title>
                       <Paragraph type="secondary" ellipsis={{ rows: 2 }} style={{ minHeight: 44 }}>
                         {pkg.description || 'Gói chăm sóc toàn diện chuẩn spa cao cấp cho thú cưng.'}
@@ -328,21 +390,34 @@ export default function LandingPage() {
 
                       <div className="price-tag-box">
                         <Text type="secondary" style={{ fontSize: 13 }}>Giá chỉ từ</Text>
-                        <div className="price-val">{money(minPrice)}</div>
+                        <div className="price-val">
+                          {minPrice != null ? money(minPrice) : 'Liên hệ báo giá'}
+                        </div>
                       </div>
 
                       <Divider style={{ margin: '16px 0' }} />
 
-                      <div className="package-items-list">
+                      <div className="package-items-list" style={{ flex: 1 }}>
                         <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>
                           Dịch vụ bao gồm trong gói:
                         </Text>
-                        {pkg.items && pkg.items.map((it) => (
-                          <div key={it.id || it.service} className="pkg-item-row">
-                            <CheckCircleFilled style={{ color: '#0f8b8d', marginRight: 8 }} />
-                            <span>{it.service_name}</span>
+                        {validItems.length > 0 ? (
+                          validItems.map((it) => (
+                            <div key={it.id || it.service} className="pkg-item-row">
+                              <CheckCircleFilled style={{ color: '#0f8b8d', marginRight: 8, flexShrink: 0 }} />
+                              <span>{it.service_name}</span>
+                              {it.duration_minutes ? (
+                                <Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
+                                  (~{it.duration_minutes}p)
+                                </Text>
+                              ) : null}
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ color: '#94a3b8', fontSize: 13, fontStyle: 'italic' }}>
+                            Bao gồm các bước chăm sóc chuẩn hóa.
                           </div>
-                        ))}
+                        )}
                       </div>
 
                       <Button
@@ -350,10 +425,15 @@ export default function LandingPage() {
                         shape="round"
                         block
                         size="large"
-                        style={{ marginTop: 24 }}
-                        onClick={handleActionClick}
+                        style={{
+                          marginTop: 24,
+                          fontWeight: 600,
+                          background: isHighlight ? '#0f8b8d' : undefined,
+                          borderColor: isHighlight ? '#0f8b8d' : undefined,
+                        }}
+                        onClick={() => handleSelectPackage(pkg)}
                       >
-                        {user ? 'Chọn đặt gói này' : 'Đăng nhập để đặt lịch'}
+                        Chọn đặt gói này
                       </Button>
                     </Card>
                   </Col>
@@ -369,19 +449,40 @@ export default function LandingPage() {
                 Các dịch vụ lẻ chuyên biệt
               </Title>
               <Row gutter={[16, 16]}>
-                {services.slice(0, 6).map((svc) => (
-                  <Col xs={24} sm={12} md={8} key={svc.id}>
-                    <Card size="small" hoverable className="service-mini-card">
-                      <Space align="start">
-                        <div className="service-dot" />
-                        <div>
-                          <Text strong>{svc.name}</Text>
-                          <div><Text type="secondary" style={{ fontSize: 12 }}>Thời lượng: ~{svc.duration_minutes} phút</Text></div>
-                        </div>
-                      </Space>
-                    </Card>
-                  </Col>
-                ))}
+                {services.slice(0, 6).map((svc) => {
+                  const pricesArr = svc.prices ? Object.values(svc.prices).filter((v) => typeof v === 'number' && v > 0) : []
+                  const minPrice = pricesArr.length > 0 ? Math.min(...pricesArr) : null
+                  return (
+                    <Col xs={24} sm={12} md={8} key={svc.id}>
+                      <Card
+                        size="small"
+                        hoverable
+                        className="service-mini-card"
+                        onClick={handleBookingClick}
+                        style={{ cursor: 'pointer', transition: 'all 0.2s', borderRadius: 10 }}
+                      >
+                        <Space align="start" style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Space align="start">
+                            <div className="service-dot" />
+                            <div>
+                              <Text strong>{svc.name}</Text>
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  Thời lượng: ~{svc.duration_minutes} phút
+                                </Text>
+                              </div>
+                            </div>
+                          </Space>
+                          {minPrice != null && (
+                            <Tag color="cyan" style={{ fontWeight: 600, fontSize: 12, borderRadius: 6 }}>
+                              từ {money(minPrice)}
+                            </Tag>
+                          )}
+                        </Space>
+                      </Card>
+                    </Col>
+                  )
+                })}
               </Row>
             </div>
           )}
@@ -449,19 +550,53 @@ export default function LandingPage() {
                   <PhoneOutlined className="contact-icon" />
                   <div>
                     <Text strong>Hotline đặt hẹn:</Text>
-                    <div>{spa?.phone || '0283000000'}</div>
+                    <div>
+                      {spa?.phone ? (
+                        <a href={`tel:${spa.phone}`} style={{ color: '#0f8b8d', fontWeight: 600 }}>
+                          {spa.phone}
+                        </a>
+                      ) : (
+                        '02838229999'
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                {spa?.email && (
+                  <div className="contact-row">
+                    <MailOutlined className="contact-icon" />
+                    <div>
+                      <Text strong>Email liên hệ:</Text>
+                      <div>
+                        <a href={`mailto:${spa.email}`} style={{ color: '#0f8b8d' }}>
+                          {spa.email}
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="contact-row">
                   <ClockCircleOutlined className="contact-icon" />
                   <div>
                     <Text strong>Khung giờ phục vụ:</Text>
                     <div>
-                      {spa?.open_time?.slice(0, 5)} – {spa?.close_time?.slice(0, 5)} (Mở cửa: {openDays})
+                      {spa?.open_time?.slice(0, 5) || '08:00'} – {spa?.close_time?.slice(0, 5) || '19:00'} ({openDays})
                     </div>
                   </div>
                 </div>
+
+                {spa?.cancel_cutoff_hours != null && (
+                  <div className="contact-row">
+                    <SafetyCertificateFilled className="contact-icon" style={{ color: '#0f8b8d' }} />
+                    <div>
+                      <Text strong>Chính sách đặt hẹn:</Text>
+                      <div>
+                        Miễn phí dời hoặc hủy lịch trước {spa.cancel_cutoff_hours} giờ hẹn
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </Col>
 
@@ -479,10 +614,10 @@ export default function LandingPage() {
                   shape="round"
                   block
                   icon={<CalendarOutlined />}
-                  onClick={handleActionClick}
-                  style={{ height: 48, marginTop: 12 }}
+                  onClick={handleBookingClick}
+                  style={{ height: 48, marginTop: 12, background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600 }}
                 >
-                  {user ? 'Vào bảng điều khiển hệ thống' : 'Đăng ký & Đặt lịch hẹn'}
+                  {user ? 'Đặt lịch dịch vụ ngay' : 'Đăng ký & Đặt lịch hẹn'}
                 </Button>
               </Card>
             </Col>
@@ -515,7 +650,7 @@ export default function LandingPage() {
                 </span>
               </Space>
               <div style={{ marginTop: 8, color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>
-                © 2026 Pet Spa AI. Tất cả quyền được bảo lưu.
+                © 2026 {spa?.name || 'Pet Spa AI'}. Tất cả quyền được bảo lưu.
               </div>
             </Col>
           </Row>

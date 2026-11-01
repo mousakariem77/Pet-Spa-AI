@@ -335,7 +335,7 @@ class AnalyticsTests(BaseCase):
 
 
 class WalkInQueueTests(BaseCase):
-    """Kiểm thử tính năng hàng đợi khách vãng lai (SPA-18)."""
+    """Kiểm thử tính năng hàng đợi khách vãng lai."""
 
     def setUp(self):
         super().setUp()

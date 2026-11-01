@@ -28,6 +28,7 @@ export const NOTIF_KIND_MAP = {
   invoice_new: { label: 'Hóa đơn mới', color: 'gold', icon: <DollarOutlined style={{ color: '#d97706' }} />, bg: '#fffbeb' },
   invoice_paid: { label: 'Đã thanh toán', color: 'green', icon: <DollarOutlined style={{ color: '#10b981' }} />, bg: '#ecfdf5' },
   reminder: { label: 'Nhắc tái spa', color: 'purple', icon: <RobotOutlined style={{ color: '#8b5cf6' }} />, bg: '#f5f3ff' },
+  rebook: { label: 'Nhắc tái spa', color: 'purple', icon: <RobotOutlined style={{ color: '#8b5cf6' }} />, bg: '#f5f3ff' },
   rebook_reminder: { label: 'Nhắc tái spa', color: 'purple', icon: <RobotOutlined style={{ color: '#8b5cf6' }} />, bg: '#f5f3ff' },
   staff: { label: 'Nhân sự', color: 'blue', icon: <UserOutlined style={{ color: '#2563eb' }} />, bg: '#eff6ff' },
   staff_timeoff: { label: 'Nghỉ phép', color: 'orange', icon: <UserOutlined style={{ color: '#ea580c' }} />, bg: '#fff7ed' },
@@ -102,34 +103,54 @@ export default function Notifications() {
   }, [load])
 
   const markAllRead = async () => {
+    setData((prev) => ({
+      ...prev,
+      results: (prev.results || []).map((r) => ({ ...r, is_read: true })),
+    }))
+    setUnreadCount(0)
     try {
       await api('/notifications/read-all', { method: 'POST' })
       message.success('Đã đánh dấu tất cả thông báo là đã đọc (vẫn lưu trữ trong hòm thư)!')
-      load()
     } catch (e) {
+      load()
       message.error(e.message || 'Lỗi khi thao tác')
     }
   }
 
   const toggleReadStatus = async (item) => {
+    const nextRead = !item.is_read
+    setData((prev) => ({
+      ...prev,
+      results: (prev.results || []).map((r) => (r.id === item.id ? { ...r, is_read: nextRead } : r)),
+    }))
+    setUnreadCount((c) => Math.max(0, nextRead ? c - 1 : c + 1))
     try {
       if (item.is_read) {
         await api(`/notifications/${item.id}/unread`, { method: 'POST' })
       } else {
         await api(`/notifications/${item.id}/read`, { method: 'POST' })
       }
-      load()
     } catch (e) {
+      load()
       message.error(e.message || 'Lỗi khi cập nhật trạng thái')
     }
   }
 
   const deleteNotification = async (id) => {
+    const target = data.results?.find((r) => r.id === id)
+    setData((prev) => ({
+      ...prev,
+      results: (prev.results || []).filter((r) => r.id !== id),
+      count: Math.max(0, (prev.count || 1) - 1),
+    }))
+    if (target && !target.is_read) {
+      setUnreadCount((c) => Math.max(0, c - 1))
+    }
     try {
       await api(`/notifications/${id}`, { method: 'DELETE' })
       message.success('Đã xóa thông báo khỏi hòm thư.')
-      load()
     } catch (e) {
+      load()
       message.error(e.message || 'Lỗi khi xóa thông báo')
     }
   }
@@ -137,17 +158,28 @@ export default function Notifications() {
   const handleClickItem = (item) => {
     if (!item.is_read) {
       api(`/notifications/${item.id}/read`, { method: 'POST' }).catch(() => {})
+      setData((prev) => ({
+        ...prev,
+        results: (prev.results || []).map((r) => (r.id === item.id ? { ...r, is_read: true } : r)),
+      }))
+      setUnreadCount((c) => Math.max(0, c - 1))
     }
     if (item.link) {
       nav(item.link)
     } else if (item.ref_type === 'booking') {
-      nav('/app/lich-hen')
+      nav(item.ref_id ? `/app/lich-hen?id=${item.ref_id}` : '/app/lich-hen')
     } else if (item.ref_type === 'invoice') {
-      nav('/app/hoa-don')
-    } else if (item.ref_type === 'reminder') {
+      nav(item.ref_id ? `/app/hoa-don?id=${item.ref_id}` : '/app/hoa-don')
+    } else if (['reminder', 'rebook', 'rebook_reminder'].includes(item.ref_type)) {
       nav('/app/nhac-tai-spa')
-    } else if (item.ref_type === 'staff') {
-      nav('/app/nhan-su')
+    } else if (['staff', 'staff_timeoff', 'timeoff'].includes(item.ref_type)) {
+      nav(item.ref_id ? `/app/nhan-su?id=${item.ref_id}` : '/app/nhan-su')
+    } else if (['client', 'customer'].includes(item.ref_type)) {
+      nav(item.ref_id ? `/app/khach-hang?id=${item.ref_id}` : '/app/khach-hang')
+    } else if (item.ref_type === 'pet') {
+      nav(item.ref_id ? `/app/thu-cung?id=${item.ref_id}` : '/app/thu-cung')
+    } else if (item.ref_type === 'analytics') {
+      nav('/app/thong-ke')
     }
   }
 

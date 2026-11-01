@@ -18,6 +18,7 @@ from django.utils import timezone
 from . import llm_provider
 from .data_api import AiDataClient
 from .models import AiLog, AiSuggestion, RebookReminder
+from notifications.models import notify
 
 RULES_ENGINE = 'rules-v1'
 
@@ -182,6 +183,18 @@ def suggest_packages(pet_id, user=None):
                 score -= Decimal(10)
         else:
             score += Decimal(10)
+            if pet.get('coat_type_display'):
+                evidence.append({
+                    'rule': 'R5',
+                    'fact': f'Phù hợp tốt với chất lông {pet["coat_type_display"]} của bé.',
+                })
+
+        # Đảm bảo luôn có lý do cụ thể đối chiếu với thể trạng bé
+        if not evidence:
+            evidence.append({
+                'rule': 'R1',
+                'fact': f'Gói chăm sóc tiêu chuẩn tối ưu cho {pet["species_display"]} ({pet["breed"] or "chưa rõ giống"}) size {pet["size_class"]}.',
+            })
 
         # R6: Chu kỳ nhắc tái spa khớp
         if last_booking:

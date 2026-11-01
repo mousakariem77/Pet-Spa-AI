@@ -28,7 +28,7 @@ def _default_link(ref_type, ref_id=None):
         return f'/app/lich-hen?id={ref_id}' if ref_id else '/app/lich-hen'
     if ref_type == 'invoice':
         return f'/app/hoa-don?id={ref_id}' if ref_id else '/app/hoa-don'
-    if ref_type == 'reminder':
+    if ref_type in ('reminder', 'rebook', 'rebook_reminder'):
         return '/app/nhac-tai-spa'
     if ref_type in ('client', 'customer'):
         return f'/app/khach-hang?id={ref_id}' if ref_id else '/app/khach-hang'

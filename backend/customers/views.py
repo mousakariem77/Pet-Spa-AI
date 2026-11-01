@@ -1,8 +1,8 @@
-from django.db.models import Count, DecimalField, Max, Q, Sum
+from django.db.models import Count, DecimalField, Max, Q, Sum, ProtectedError
 from django.db.models.functions import Coalesce
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -71,13 +71,32 @@ class ClientViewSet(viewsets.ModelViewSet):
             if ordering in allowed_orderings:
                 qs = qs.order_by(allowed_orderings[ordering])
 
-        if self.action == 'list' and self.request.query_params.get('include_inactive') != '1':
+        active_status = self.request.query_params.get('active_status')
+        if active_status == 'active':
+            qs = qs.filter(is_active=True)
+        elif active_status == 'hidden':
+            qs = qs.filter(is_active=False)
+        elif self.action == 'list' and self.request.query_params.get('include_inactive') != '1':
             qs = qs.filter(is_active=True)
         return qs
 
+    @action(detail=False, methods=['get'], url_path='counts')
+    def counts(self, request):
+        total = Client.objects.count()
+        active = Client.objects.filter(is_active=True).count()
+        hidden = Client.objects.filter(is_active=False).count()
+        return Response({'all': total, 'active': active, 'hidden': hidden})
+
     def perform_destroy(self, instance):
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa khách hàng đã bị ẩn. Vui lòng ẩn khách hàng trước khi xóa.'})
+        try:
+            user = instance.user
+            instance.delete()
+            if user:
+                user.delete()
+        except ProtectedError:
+            raise ValidationError({'detail': 'Không thể xóa vĩnh viễn khách hàng này do đã có dữ liệu lịch hẹn hoặc hóa đơn liên quan. Hãy giữ ở trạng thái ẩn để bảo toàn lịch sử giao dịch.'})
 
     def perform_update(self, serializer):
         client = serializer.save()
@@ -146,7 +165,12 @@ class PetViewSet(viewsets.ModelViewSet):
         client_id = self.request.query_params.get('client') or self.request.query_params.get('client_id')
         if client_id and u.role != Role.CUSTOMER:
             qs = qs.filter(client_id=client_id)
-        if self.request.query_params.get('include_inactive') != '1':
+        active_status = self.request.query_params.get('active_status')
+        if active_status == 'active':
+            qs = qs.filter(is_active=True)
+        elif active_status == 'hidden':
+            qs = qs.filter(is_active=False)
+        elif self.request.query_params.get('include_inactive') != '1':
             qs = qs.filter(is_active=True)
         return qs
 
@@ -182,8 +206,12 @@ class PetViewSet(viewsets.ModelViewSet):
             serializer.save()
 
     def perform_destroy(self, instance):
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa thú cưng đã bị ẩn. Vui lòng ẩn thú cưng trước khi xóa.'})
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({'detail': 'Không thể xóa vĩnh viễn thú cưng này do đã có lịch hẹn liên quan. Hãy giữ ở trạng thái ẩn.'})
 
     @action(detail=True, methods=['get', 'post'], url_path='vaccinations')
     def vaccinations(self, request, pk=None):

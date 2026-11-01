@@ -56,6 +56,8 @@ class RebookRule(models.Model):
     interval_days = models.PositiveSmallIntegerField('Chu kỳ (ngày)', default=45)
     overdue_days = models.PositiveSmallIntegerField('Ngưỡng quá hạn (ngày)', default=14)
     note_vi = models.CharField('Ghi chú luật', max_length=250, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Luật nhắc tái spa'

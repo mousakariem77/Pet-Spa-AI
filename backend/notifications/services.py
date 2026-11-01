@@ -177,34 +177,44 @@ def notify_booking_cancelled(booking, reason=''):
 
 def notify_invoice_created(invoice):
     """Thông báo hóa đơn mới cho khách hàng."""
-    if not invoice or not getattr(invoice, 'client', None):
+    if not invoice:
         return []
-    if getattr(invoice.client, 'user_id', None):
+    booking = getattr(invoice, 'booking', None)
+    client = getattr(booking, 'client', None) if booking else None
+    if client and getattr(client, 'user_id', None):
+        total_val = getattr(invoice, 'total', 0)
+        inv_no = getattr(invoice, 'invoice_no', str(invoice.id))
         return notify_user(
-            user=invoice.client.user,
+            user=client.user,
             kind='invoice_new',
-            title=f'Hóa đơn dịch vụ #{invoice.id}',
-            body=f'Hóa đơn {invoice.total_amount:,.0f}đ đã được tạo. Bạn có thể kiểm tra chi tiết tại mục Hóa đơn.',
+            title=f'Hóa đơn dịch vụ #{inv_no}',
+            body=f'Hóa đơn dịch vụ #{inv_no} số tiền {total_val:,.0f}đ đã được tạo. Bạn có thể kiểm tra chi tiết tại mục Hóa đơn.',
             ref_type='invoice',
             ref_id=invoice.id,
             link=f'/app/hoa-don?id={invoice.id}',
         )
+    return []
 
 
 def notify_invoice_paid(invoice):
     """Thông báo thanh toán thành công."""
-    if not invoice or not getattr(invoice, 'client', None):
+    if not invoice:
         return []
-    if getattr(invoice.client, 'user_id', None):
+    booking = getattr(invoice, 'booking', None)
+    client = getattr(booking, 'client', None) if booking else None
+    if client and getattr(client, 'user_id', None):
+        total_val = getattr(invoice, 'total', 0)
+        inv_no = getattr(invoice, 'invoice_no', str(invoice.id))
         return notify_user(
-            user=invoice.client.user,
+            user=client.user,
             kind='invoice_paid',
             title='Thanh toán thành công',
-            body=f'Đã xác nhận thanh toán hóa đơn #{invoice.id} ({invoice.total_amount:,.0f}đ). Cảm ơn quý khách!',
+            body=f'Đã xác nhận thanh toán hóa đơn #{inv_no} số tiền {total_val:,.0f}đ. Cảm ơn bạn đã tin tưởng dịch vụ!',
             ref_type='invoice',
             ref_id=invoice.id,
             link=f'/app/hoa-don?id={invoice.id}',
         )
+    return []
 
 
 # ==============================================================================

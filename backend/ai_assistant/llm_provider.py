@@ -63,6 +63,11 @@ def complete(messages, max_tokens=500, temperature=0.4):
             logger.warning('OpenRouter model %s trả nội dung rỗng', model)
         except urllib.error.HTTPError as e:
             logger.warning('OpenRouter model %s lỗi HTTP %s', model, e.code)
+            if e.code in (401, 402, 403):
+                break
         except Exception as e:  # mạng, timeout, JSON sai... -> thử model kế tiếp
             logger.warning('OpenRouter model %s lỗi: %s', model, e)
+            err_str = str(e)
+            if '11001' in err_str or 'getaddrinfo failed' in err_str or 'Name or service not known' in err_str:
+                break
     return None

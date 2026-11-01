@@ -239,7 +239,7 @@ function KnowledgeBaseTab() {
     {
       title: 'Số đoạn tri thức (Chunks)',
       key: 'chunks',
-      width: 170,
+      width: 180,
       render: (_, r) => (
         <Tag color="geekblue" style={{ fontWeight: 600 }}>
           {r.chunks?.length || 0} đoạn trích
@@ -247,24 +247,11 @@ function KnowledgeBaseTab() {
       ),
     },
     {
-      title: 'Cập nhật lần cuối',
-      dataIndex: 'updated_at',
-      width: 160,
-      render: (d) => (d ? dayjs(d).format('DD/MM/YYYY HH:mm') : '—'),
-    },
-    {
       title: 'Thao tác',
       key: 'act',
-      width: 160,
+      width: 110,
       render: (_, r) => (
         <Space onClick={(e) => e.stopPropagation()}>
-          <Button
-            size="small"
-            icon={<FileTextOutlined />}
-            onClick={(e) => { e.stopPropagation(); setDetailDoc(r); }}
-          >
-            Đoạn trích
-          </Button>
           <Button
             size="small"
             icon={<EditOutlined />}
@@ -356,8 +343,7 @@ function KnowledgeBaseTab() {
         </Space>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-        <Text type="secondary" style={{ fontSize: 13 }}>💡 Bấm vào dòng tài liệu hoặc nút "Đoạn trích" để kiểm tra các phần chia nhỏ (chunks)</Text>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 10 }}>
         <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
       </div>
 
@@ -653,7 +639,12 @@ function KnowledgeBaseTab() {
       <Modal
         centered
         open={!!detailDoc}
-        title={<span><BookOutlined style={{ color: '#0f8b8d', marginRight: 8 }} /> Các đoạn trích tri thức: {detailDoc?.title}</span>}
+        title={
+          <span>
+            <BookOutlined style={{ color: '#0f8b8d', marginRight: 8 }} />
+            Chi tiết tài liệu tri thức: {detailDoc?.title}
+          </span>
+        }
         onCancel={() => setDetailDoc(null)}
         footer={[
           <Button key="close" onClick={() => setDetailDoc(null)}>
@@ -662,26 +653,69 @@ function KnowledgeBaseTab() {
         ]}
         width={760}
       >
-        {detailDoc?.chunks && detailDoc.chunks.length > 0 ? (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
-            <Alert
-              type="info"
-              message={`Tài liệu này được hệ thống AI tự động chia thành ${detailDoc.chunks.length} đoạn trích (chunks) để tìm kiếm chính xác khi khách hỏi.`}
-              showIcon
-            />
-            {detailDoc.chunks.map((chk, i) => (
-              <Card size="small" key={chk.id || i} style={{ background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                <Text strong style={{ color: '#0f8b8d' }}>
-                  Đoạn #{i + 1}: {chk.heading || detailDoc.title}
-                </Text>
-                <div style={{ marginTop: 6, whiteSpace: 'pre-line', fontSize: 13, color: '#334155' }}>
-                  {chk.text}
-                </div>
-              </Card>
-            ))}
-          </Space>
-        ) : (
-          <Empty description="Tài liệu chưa có đoạn trích nào" />
+        {detailDoc && (
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                padding: '10px 14px',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                marginBottom: 16,
+              }}
+            >
+              <Space wrap size={8}>
+                {detailDoc.doc_type && (
+                  <Tag
+                    color={DOC_TYPES[detailDoc.doc_type]?.color || 'default'}
+                    style={{ margin: 0, padding: '2px 8px', borderRadius: 4, fontSize: 13 }}
+                  >
+                    {DOC_TYPES[detailDoc.doc_type]?.icon} {DOC_TYPES[detailDoc.doc_type]?.label || detailDoc.doc_type}
+                  </Tag>
+                )}
+                <Tag color="geekblue" style={{ margin: 0, fontWeight: 600, padding: '2px 8px', borderRadius: 4, fontSize: 13 }}>
+                  {detailDoc.chunks?.length || 0} đoạn trích (chunks)
+                </Tag>
+              </Space>
+
+              <div style={{ fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ClockCircleOutlined style={{ color: '#0f8b8d' }} />
+                <span>
+                  Cập nhật lần cuối:{' '}
+                  <strong style={{ color: '#0b3d3f' }}>
+                    {dayjs(detailDoc.updated_at || detailDoc.created_at).format('DD/MM/YYYY HH:mm')}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            {detailDoc.chunks && detailDoc.chunks.length > 0 ? (
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                <Alert
+                  type="info"
+                  message={`Tài liệu này được hệ thống AI tự động chia thành ${detailDoc.chunks.length} đoạn trích (chunks) để tìm kiếm chính xác khi khách hỏi.`}
+                  showIcon
+                />
+                {detailDoc.chunks.map((chk, i) => (
+                  <Card size="small" key={chk.id || i} style={{ background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <Text strong style={{ color: '#0f8b8d' }}>
+                      Đoạn #{i + 1}: {chk.heading || detailDoc.title}
+                    </Text>
+                    <div style={{ marginTop: 6, whiteSpace: 'pre-line', fontSize: 13, color: '#334155' }}>
+                      {chk.text}
+                    </div>
+                  </Card>
+                ))}
+              </Space>
+            ) : (
+              <Empty description="Tài liệu chưa có đoạn trích nào" />
+            )}
+          </div>
         )}
       </Modal>
     </div>
@@ -702,6 +736,10 @@ function ExpertRulesTab() {
   const [packages, setPackages] = useState([])
   const [contraModalOpen, setContraModalOpen] = useState(false)
   const [rebookModalOpen, setRebookModalOpen] = useState(false)
+  const [editingContra, setEditingContra] = useState(null)
+  const [detailContra, setDetailContra] = useState(null)
+  const [editingRebook, setEditingRebook] = useState(null)
+  const [detailRebook, setDetailRebook] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [formContra] = Form.useForm()
   const [formRebook] = Form.useForm()
@@ -738,18 +776,48 @@ function ExpertRulesTab() {
     loadData()
   }, [])
 
-  const handleAddContra = async () => {
+  const handleOpenAddContra = () => {
+    setEditingContra(null)
+    formContra.resetFields()
+    formContra.setFieldsValue({ severity: 'block' })
+    setContraModalOpen(true)
+  }
+
+  const handleOpenEditContra = (record) => {
+    setEditingContra(record)
+    formContra.resetFields()
+    formContra.setFieldsValue({
+      service: record.service,
+      health_tag: record.health_tag,
+      severity: record.severity,
+      reason_vi: record.reason_vi,
+    })
+    setContraModalOpen(true)
+  }
+
+  const handleSaveContra = async () => {
     try {
       const values = await formContra.validateFields()
       setSubmitting(true)
-      await api('/service-contraindications', {
-        method: 'POST',
-        body: JSON.stringify(values),
-      })
-      message.success('Đã thêm quy tắc chống chỉ định mới')
+      if (editingContra) {
+        await api(`/service-contraindications/${editingContra.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(values),
+        })
+        message.success('Đã cập nhật quy tắc chống chỉ định thành công')
+      } else {
+        await api('/service-contraindications', {
+          method: 'POST',
+          body: JSON.stringify(values),
+        })
+        message.success('Đã thêm quy tắc chống chỉ định mới')
+      }
       setContraModalOpen(false)
       formContra.resetFields()
       loadData()
+      if (detailContra && editingContra && detailContra.id === editingContra.id) {
+        setDetailContra(null)
+      }
     } catch (e) {
       message.error(e.message || 'Lỗi khi lưu quy tắc chống chỉ định')
     } finally {
@@ -762,6 +830,9 @@ function ExpertRulesTab() {
       await api(`/service-contraindications/${id}`, { method: 'DELETE' })
       message.success('Đã xóa quy tắc chống chỉ định')
       loadData()
+      if (detailContra && detailContra.id === id) {
+        setDetailContra(null)
+      }
     } catch (e) {
       message.error(e.message || 'Không thể xóa')
     }
@@ -782,20 +853,52 @@ function ExpertRulesTab() {
     })
   }
 
-  const handleAddRebook = async () => {
+  const handleOpenAddRebook = () => {
+    setEditingRebook(null)
+    formRebook.resetFields()
+    formRebook.setFieldsValue({ species: 'all', coat_type: 'all', interval_days: 30, overdue_days: 14 })
+    setRebookModalOpen(true)
+  }
+
+  const handleOpenEditRebook = (record) => {
+    setEditingRebook(record)
+    formRebook.resetFields()
+    formRebook.setFieldsValue({
+      package: record.package,
+      species: record.species || 'all',
+      coat_type: record.coat_type || 'all',
+      interval_days: record.interval_days,
+      overdue_days: record.overdue_days,
+      note_vi: record.note_vi,
+    })
+    setRebookModalOpen(true)
+  }
+
+  const handleSaveRebook = async () => {
     try {
       const values = await formRebook.validateFields()
       setSubmitting(true)
-      await api('/rebook-rules', {
-        method: 'POST',
-        body: JSON.stringify(values),
-      })
-      message.success('Đã thêm quy tắc chu kỳ tái spa mới')
+      if (editingRebook) {
+        await api(`/rebook-rules/${editingRebook.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(values),
+        })
+        message.success('Đã cập nhật quy chuẩn chu kỳ tái spa thành công')
+      } else {
+        await api('/rebook-rules', {
+          method: 'POST',
+          body: JSON.stringify(values),
+        })
+        message.success('Đã thêm quy chuẩn chu kỳ tái spa mới')
+      }
       setRebookModalOpen(false)
       formRebook.resetFields()
       loadData()
+      if (detailRebook && editingRebook && detailRebook.id === editingRebook.id) {
+        setDetailRebook(null)
+      }
     } catch (e) {
-      message.error(e.message || 'Lỗi khi lưu quy tắc chu kỳ')
+      message.error(e.message || 'Lỗi khi lưu quy chuẩn chu kỳ')
     } finally {
       setSubmitting(false)
     }
@@ -825,7 +928,7 @@ function ExpertRulesTab() {
     })
   }
 
-  // Cột Ma trận chống chỉ định (ĐÃ SỬA TRIỆT ĐỂ LỖI CỘT RỖNG)
+  // Cột Ma trận chống chỉ định
   const contraColumns = [
     {
       title: 'Dịch vụ áp dụng',
@@ -857,21 +960,29 @@ function ExpertRulesTab() {
         ),
     },
     {
-      title: 'Lý do & Hướng dẫn an toàn y tế',
-      dataIndex: 'reason_vi',
-      render: (v) => <span style={{ color: '#334155' }}>{v || '—'}</span>,
-    },
-    {
       title: 'Thao tác',
       key: 'act',
-      width: 80,
+      width: 100,
       render: (_, r) => (
-        <Button
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => confirmDeleteContra(r)}
-        />
+        <Space onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleOpenEditContra(r)
+            }}
+          />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={(e) => {
+              e.stopPropagation()
+              confirmDeleteContra(r)
+            }}
+          />
+        </Space>
       ),
     },
   ]
@@ -929,14 +1040,27 @@ function ExpertRulesTab() {
     {
       title: 'Thao tác',
       key: 'act',
-      width: 80,
+      width: 100,
       render: (_, r) => (
-        <Button
-          size="small"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => confirmDeleteRebook(r)}
-        />
+        <Space onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleOpenEditRebook(r)
+            }}
+          />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={(e) => {
+              e.stopPropagation()
+              confirmDeleteRebook(r)
+            }}
+          />
+        </Space>
       ),
     },
   ]
@@ -1035,10 +1159,7 @@ function ExpertRulesTab() {
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
-                      onClick={() => {
-                        formContra.resetFields()
-                        setContraModalOpen(true)
-                      }}
+                      onClick={handleOpenAddContra}
                       style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
                     >
                       Thêm quy tắc chống chỉ định
@@ -1050,6 +1171,11 @@ function ExpertRulesTab() {
                   loading={loading}
                   dataSource={contraData}
                   columns={contraColumns}
+                  rowClassName={() => 'clickable-row'}
+                  onRow={(record) => ({
+                    onClick: () => setDetailContra(record),
+                    style: { cursor: 'pointer' },
+                  })}
                   pagination={{
                     pageSize: 8,
                     showTotal: (total, range) => `${range[0]}-${range[1]} / ${total} quy tắc`,
@@ -1084,10 +1210,7 @@ function ExpertRulesTab() {
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
-                      onClick={() => {
-                        formRebook.resetFields()
-                        setRebookModalOpen(true)
-                      }}
+                      onClick={handleOpenAddRebook}
                       style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
                     >
                       Thêm quy chuẩn chu kỳ
@@ -1099,6 +1222,11 @@ function ExpertRulesTab() {
                   loading={loading}
                   dataSource={rebookData}
                   columns={rebookColumns}
+                  rowClassName={() => 'clickable-row'}
+                  onRow={(record) => ({
+                    onClick: () => setDetailRebook(record),
+                    style: { cursor: 'pointer' },
+                  })}
                   pagination={{
                     pageSize: 8,
                     showTotal: (total, range) => `${range[0]}-${range[1]} / ${total} quy chuẩn`,
@@ -1111,15 +1239,196 @@ function ExpertRulesTab() {
         ]}
       />
 
-      {/* Modal thêm chống chỉ định */}
+      {/* Modal xem chi tiết chống chỉ định */}
+      <Modal
+        centered
+        open={!!detailContra}
+        title={
+          <span>
+            <SafetyCertificateOutlined style={{ color: '#e11d48', marginRight: 8 }} />
+            Chi Tiết Rào Chắn Y Tế & Chống Chỉ Định
+          </span>
+        }
+        onCancel={() => setDetailContra(null)}
+        footer={[
+          <Button key="close" onClick={() => setDetailContra(null)}>
+            Đóng
+          </Button>,
+          <Button
+            key="edit"
+            type="primary"
+            icon={<EditOutlined />}
+            style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+            onClick={() => {
+              const rec = detailContra
+              setDetailContra(null)
+              handleOpenEditContra(rec)
+            }}
+          >
+            Chỉnh sửa
+          </Button>,
+        ]}
+        width={620}
+      >
+        {detailContra && (
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                padding: '10px 14px',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                marginBottom: 16,
+              }}
+            >
+              <Tag
+                color={detailContra.severity === 'block' ? 'red' : 'orange'}
+                icon={detailContra.severity === 'block' ? <CloseCircleOutlined /> : <AlertOutlined />}
+                style={{ fontWeight: 600, fontSize: 13, padding: '3px 8px', borderRadius: 4, margin: 0 }}
+              >
+                {detailContra.severity === 'block' ? 'CẤM DÙNG (BLOCK)' : 'CẢNH BÁO (WARN)'}
+              </Tag>
+              <div style={{ fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ClockCircleOutlined style={{ color: '#0f8b8d' }} />
+                <span>
+                  Cập nhật lần cuối:{' '}
+                  <strong style={{ color: '#0b3d3f' }}>
+                    {dayjs(detailContra.updated_at || detailContra.created_at).format('DD/MM/YYYY HH:mm')}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="Dịch vụ áp dụng">
+                <strong style={{ color: '#0b3d3f' }}>{detailContra.service_name || `Dịch vụ #${detailContra.service}`}</strong>
+              </Descriptions.Item>
+              <Descriptions.Item label="Thẻ sức khỏe / Tiền sử">
+                <Tag color="purple" style={{ fontSize: 13, padding: '2px 8px', borderRadius: 6 }}>
+                  🏷️ {detailContra.health_tag_name || `Thẻ #${detailContra.health_tag}`}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Mức độ an toàn">
+                {detailContra.severity === 'block' ? (
+                  <Text type="danger" strong>
+                    CẤM DÙNG (BLOCK) — Loại bỏ hoàn toàn khỏi gợi ý, chặn xếp lịch tại quầy
+                  </Text>
+                ) : (
+                  <Text type="warning" strong>
+                    CẢNH BÁO (WARN) — Cảnh báo KTV & lưu ý quy trình chăm sóc đặc biệt
+                  </Text>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="Lý do & Hướng dẫn an toàn y tế">
+                <div style={{ whiteSpace: 'pre-line', color: '#334155', lineHeight: 1.6, padding: '4px 0' }}>
+                  {detailContra.reason_vi || 'Chưa có hướng dẫn an toàn'}
+                </div>
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal xem chi tiết quy chuẩn chu kỳ */}
+      <Modal
+        centered
+        open={!!detailRebook}
+        title={
+          <span>
+            <ClockCircleOutlined style={{ color: '#0f8b8d', marginRight: 8 }} />
+            Chi Tiết Quy Chuẩn Chu Kỳ Nhắc Tái Spa
+          </span>
+        }
+        onCancel={() => setDetailRebook(null)}
+        footer={[
+          <Button key="close" onClick={() => setDetailRebook(null)}>
+            Đóng
+          </Button>,
+          <Button
+            key="edit"
+            type="primary"
+            icon={<EditOutlined />}
+            style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+            onClick={() => {
+              const rec = detailRebook
+              setDetailRebook(null)
+              handleOpenEditRebook(rec)
+            }}
+          >
+            Chỉnh sửa
+          </Button>,
+        ]}
+        width={620}
+      >
+        {detailRebook && (
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 8,
+                padding: '10px 14px',
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                marginBottom: 16,
+              }}
+            >
+              <Space wrap size={8}>
+                <Tag color="orange" style={{ fontWeight: 600, fontSize: 13, padding: '2px 8px', borderRadius: 4, margin: 0 }}>
+                  Chu kỳ: {detailRebook.interval_days} ngày
+                </Tag>
+                <Tag color="volcano" style={{ fontWeight: 600, fontSize: 13, padding: '2px 8px', borderRadius: 4, margin: 0 }}>
+                  Quá hạn: +{detailRebook.overdue_days || 0} ngày
+                </Tag>
+              </Space>
+              <div style={{ fontSize: 13, color: '#475569', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ClockCircleOutlined style={{ color: '#0f8b8d' }} />
+                <span>
+                  Cập nhật lần cuối:{' '}
+                  <strong style={{ color: '#0b3d3f' }}>
+                    {dayjs(detailRebook.updated_at || detailRebook.created_at).format('DD/MM/YYYY HH:mm')}
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            <Descriptions bordered column={1} size="small">
+              <Descriptions.Item label="Gói combo áp dụng">
+                <strong style={{ color: '#0b3d3f' }}>{detailRebook.package_name || `Gói combo #${detailRebook.package}`}</strong>
+              </Descriptions.Item>
+              <Descriptions.Item label="Đối tượng loài áp dụng">
+                <Tag color="blue">{speciesLabels[detailRebook.species] || detailRebook.species || 'Tất cả loài'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Chất lông áp dụng">
+                <Tag color="cyan">{coatTypeLabels[detailRebook.coat_type] || detailRebook.coat_type || 'Mọi loại lông'}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Lý do gửi khách / Ghi chú luật">
+                <div style={{ whiteSpace: 'pre-line', color: '#334155', lineHeight: 1.6, padding: '4px 0' }}>
+                  {detailRebook.note_vi || 'Chưa có ghi chú'}
+                </div>
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal nạp / sửa chống chỉ định */}
       <Modal
         centered
         open={contraModalOpen}
-        title="Thêm Quy Tắc Chống Chỉ Định Mới"
+        title={editingContra ? 'Chỉnh Sửa Quy Tắc Chống Chỉ Định' : 'Thêm Quy Tắc Chống Chỉ Định Mới'}
         onCancel={() => setContraModalOpen(false)}
-        onOk={handleAddContra}
+        onOk={handleSaveContra}
         confirmLoading={submitting}
-        okText="Lưu quy tắc"
+        okText={editingContra ? 'Cập nhật quy tắc' : 'Lưu quy tắc'}
         cancelText="Hủy"
         width={600}
       >
@@ -1160,15 +1469,15 @@ function ExpertRulesTab() {
         </Form>
       </Modal>
 
-      {/* Modal thêm luật chu kỳ */}
+      {/* Modal nạp / sửa luật chu kỳ */}
       <Modal
         centered
         open={rebookModalOpen}
-        title="Thêm Quy Chuẩn Chu Kỳ Tái Spa Mới"
+        title={editingRebook ? 'Chỉnh Sửa Quy Chuẩn Chu Kỳ Tái Spa' : 'Thêm Quy Chuẩn Chu Kỳ Tái Spa Mới'}
         onCancel={() => setRebookModalOpen(false)}
-        onOk={handleAddRebook}
+        onOk={handleSaveRebook}
         confirmLoading={submitting}
-        okText="Lưu quy chuẩn"
+        okText={editingRebook ? 'Cập nhật quy chuẩn' : 'Lưu quy chuẩn'}
         cancelText="Hủy"
         width={620}
       >
@@ -1368,15 +1677,6 @@ function AiLogsTab() {
       ),
     },
     {
-      title: 'Phản hồi từ AI',
-      dataIndex: 'output_text',
-      render: (txt) => (
-        <Text style={{ fontSize: 13, color: '#334155', maxWidth: 300 }} ellipsis={{ tooltip: txt }}>
-          {txt || '—'}
-        </Text>
-      ),
-    },
-    {
       title: 'Trạng thái',
       dataIndex: 'status',
       width: 120,
@@ -1529,13 +1829,6 @@ function AiLogsTab() {
                 {detailLog.output_text || '—'}
               </div>
             </Descriptions.Item>
-            {detailLog.context_refs && Object.keys(detailLog.context_refs).length > 0 && (
-              <Descriptions.Item label="Dữ kiện & Tài liệu trích xuất">
-                <pre style={{ fontSize: 11, background: '#f1f5f9', padding: 8, borderRadius: 6, maxHeight: 120, overflowY: 'auto' }}>
-                  {JSON.stringify(detailLog.context_refs, null, 2)}
-                </pre>
-              </Descriptions.Item>
-            )}
           </Descriptions>
         )}
       </Modal>

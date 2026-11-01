@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, App, Button, Card, Col, Descriptions, Divider, Drawer, Form, Input,
-  InputNumber, Modal, Popconfirm, Radio, Row, Select, Space,
-  Switch, Table, Tabs, Tag, Typography,
+  InputNumber, Modal, Popconfirm, Radio, Row, Segmented, Select, Space,
+  Switch, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd'
 import {
-  DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined,
+  DeleteOutlined, EditOutlined, ExclamationCircleOutlined, EyeInvisibleOutlined, EyeOutlined, PlusOutlined,
   ReloadOutlined, ShopOutlined,
 } from '@ant-design/icons'
 import { api, money, toFormErrors, unwrap } from '../api.js'
@@ -140,10 +140,14 @@ export default function Catalog() {
   const [serviceSearch, setServiceSearch] = useState('')
   const [serviceCategoryFilter, setServiceCategoryFilter] = useState('')
   const [serviceSpeciesFilter, setServiceSpeciesFilter] = useState('')
+  const [serviceStatusFilter, setServiceStatusFilter] = useState('all') // 'all' | 'active' | 'hidden'
   const [packagePage, setPackagePage] = useState(1)
   const [packagePageSize, setPackagePageSize] = useState(10)
   const [packageSearch, setPackageSearch] = useState('')
   const [packageSpeciesFilter, setPackageSpeciesFilter] = useState('')
+  const [packageStatusFilter, setPackageStatusFilter] = useState('all') // 'all' | 'active' | 'hidden'
+  const [deleteTarget, setDeleteTarget] = useState(null) // { target, type: 'service' | 'package' }
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   // Sửa giá
   const [editingPrice, setEditingPrice] = useState(null)
@@ -167,6 +171,18 @@ export default function Catalog() {
   const packageSpeciesScope = Form.useWatch('species_scope', packageForm) || 'both'
   const generatedPackageCode = generatePackageCode(packageName, packages)
 
+  const serviceCounts = {
+    all: services.length,
+    active: services.filter((s) => s.is_active).length,
+    hidden: services.filter((s) => !s.is_active).length,
+  }
+
+  const packageCounts = {
+    all: packages.length,
+    active: packages.filter((p) => p.is_active).length,
+    hidden: packages.filter((p) => !p.is_active).length,
+  }
+
   const normalizedServiceSearch = serviceSearch.trim().toLocaleLowerCase('vi')
   const filteredServices = services.filter((service) => {
     const matchesSearch = !normalizedServiceSearch
@@ -174,6 +190,7 @@ export default function Catalog() {
     return matchesSearch
       && (!serviceCategoryFilter || service.category === serviceCategoryFilter)
       && (!serviceSpeciesFilter || service.species_scope === serviceSpeciesFilter || service.species_scope === 'both')
+      && (serviceStatusFilter === 'all' || (serviceStatusFilter === 'active' && service.is_active) || (serviceStatusFilter === 'hidden' && !service.is_active))
   })
 
   const normalizedPackageSearch = packageSearch.trim().toLocaleLowerCase('vi')
@@ -182,6 +199,7 @@ export default function Catalog() {
       || `${pkg.name} ${pkg.description || ''}`.toLocaleLowerCase('vi').includes(normalizedPackageSearch)
     return matchesSearch
       && (!packageSpeciesFilter || pkg.species_scope === packageSpeciesFilter || pkg.species_scope === 'both')
+      && (packageStatusFilter === 'all' || (packageStatusFilter === 'active' && pkg.is_active) || (packageStatusFilter === 'hidden' && !pkg.is_active))
   })
 
   const load = useCallback(async () => {
@@ -273,36 +291,57 @@ export default function Catalog() {
     }
   }
 
-  const deleteService = async (service) => {
+  const setServiceActive = async (service, isActive) => {
     try {
-      await api(`/services/${service.id}`, { method: 'DELETE' })
-      message.success('Đã ẩn dịch vụ khỏi danh mục.')
-      setDetailItem(null)
+      await api(`/services/${service.id}`, { method: 'PATCH', body: { is_active: isActive } })
+      message.success(isActive ? 'Đã hiển thị lại dịch vụ thành công.' : 'Đã ẩn dịch vụ khỏi danh mục.')
+      if (detailItem?.type === 'service' && detailItem.data.id === service.id) {
+        setDetailItem({ type: 'service', data: { ...detailItem.data, is_active: isActive } })
+      }
       load()
     } catch (e) {
-      message.error(e.message || 'Không thể xóa dịch vụ.')
-    }
-  }
-
-  const restoreService = async (service) => {
-    try {
-      await api(`/services/${service.id}`, { method: 'PATCH', body: { is_active: true } })
-      message.success('Đã hiển thị lại dịch vụ.')
-      setDetailItem(null)
-      load()
-    } catch (e) {
-      message.error(e.message || 'Không thể hiển thị lại dịch vụ.')
+      message.error(e.message || (isActive ? 'Không thể hiển thị lại dịch vụ.' : 'Không thể ẩn dịch vụ.'))
     }
   }
 
   const setPackageActive = async (pkg, isActive) => {
     try {
       await api(`/packages/${pkg.id}`, { method: 'PATCH', body: { is_active: isActive } })
-      message.success(isActive ? 'Đã hiển thị lại gói combo.' : 'Đã ẩn gói combo khỏi danh mục.')
-      setDetailItem(null)
+      message.success(isActive ? 'Đã hiển thị lại gói combo thành công.' : 'Đã ẩn gói combo khỏi danh mục.')
+      if (detailItem?.type === 'package' && detailItem.data.id === pkg.id) {
+        setDetailItem({ type: 'package', data: { ...detailItem.data, is_active: isActive } })
+      }
       load()
     } catch (e) {
       message.error(e.message || (isActive ? 'Không thể hiển thị lại gói combo.' : 'Không thể ẩn gói combo.'))
+    }
+  }
+
+  const openDeleteConfirm = (target, type = 'service') => {
+    if (target.is_active) {
+      message.warning(`Cần ẩn ${type === 'service' ? 'dịch vụ' : 'gói combo'} này trước khi có thể xóa vĩnh viễn!`)
+      return
+    }
+    setDeleteTarget({ target, type })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    const { target, type } = deleteTarget
+    setDeleteBusy(true)
+    try {
+      const endpoint = type === 'service' ? `/services/${target.id}` : `/packages/${target.id}`
+      await api(endpoint, { method: 'DELETE' })
+      message.success(`Đã xóa vĩnh viễn ${type === 'service' ? 'dịch vụ' : 'gói combo'} thành công!`)
+      if (detailItem?.data?.id === target.id) {
+        setDetailItem(null)
+      }
+      setDeleteTarget(null)
+      load()
+    } catch (e) {
+      message.error(e.message || `Không thể xóa ${type === 'service' ? 'dịch vụ' : 'gói combo'}.`)
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -390,30 +429,73 @@ export default function Catalog() {
       title: 'Dịch vụ',
       dataIndex: 'name',
       render: (v, r) => (
-        <>
+        <div style={{ maxWidth: 360 }}>
           <Text strong style={{ fontSize: 15, color: '#0b3d3f' }}>{v}</Text>
-          {!r.is_active && <Tag color="default" style={{ marginLeft: 8 }}>Đã ẩn</Tag>}
-          <div style={{ fontSize: 12, color: '#64748b' }}>{r.description || 'Chưa có mô tả'}</div>
-        </>
+          <div
+            style={{
+              fontSize: 12,
+              color: '#64748b',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: 320,
+            }}
+            title={r.description || ''}
+          >
+            {r.description || 'Chưa có mô tả'}
+          </div>
+        </div>
       ),
     },
     { title: 'Nhóm', dataIndex: 'category', render: (v) => <Tag color="blue">{CATEGORY[v] || v}</Tag> },
     { title: 'Loài', dataIndex: 'species_scope', render: (v) => <Tag color="purple">{SPECIES[v] || v}</Tag> },
     { title: 'Thời lượng', dataIndex: 'duration_minutes', align: 'right', render: (m) => `${m} phút` },
     {
+      title: 'Trạng thái',
+      dataIndex: 'is_active',
+      width: 130,
+      align: 'center',
+      render: (active) => (
+        active ? (
+          <Tag color="success">Đang cung cấp</Tag>
+        ) : (
+          <Tag color="default">Đã ẩn</Tag>
+        )
+      ),
+    },
+    {
       title: 'Thao tác',
       key: 'act',
-      width: 140,
+      width: isManager ? 140 : 90,
       align: 'center',
       render: (_, r) => (
-        <Button
-          block
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'service', data: r }) }}
-        >
-          Chi tiết
-        </Button>
+        <Space size={6} onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => setDetailItem({ type: 'service', data: r })}
+          >
+            Chi tiết
+          </Button>
+          {isManager && (
+            r.is_active ? (
+              <Tooltip title="Cần ẩn dịch vụ trước khi có thể xóa">
+                <span>
+                  <Button size="small" danger disabled icon={<DeleteOutlined />} />
+                </span>
+              </Tooltip>
+            ) : (
+              <Tooltip title="Xóa vĩnh viễn dịch vụ này">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => openDeleteConfirm(r, 'service')}
+                />
+              </Tooltip>
+            )
+          )}
+        </Space>
       ),
     },
   ]
@@ -423,14 +505,27 @@ export default function Catalog() {
       title: 'Gói combo',
       dataIndex: 'name',
       render: (v, r) => (
-        <>
+        <div style={{ maxWidth: 360 }}>
           <Text strong style={{ fontSize: 15, color: '#0b3d3f' }}>{v}</Text>
-          {!r.is_active && <Tag color="default" style={{ marginLeft: 8 }}>Đã ẩn</Tag>}
           <div style={{ fontSize: 12, color: '#0f8b8d', marginTop: 2 }}>
             💡 Gồm: {r.items?.map((i) => i.service_name).join(' + ') || 'Chưa gắn dịch vụ'}
           </div>
-          {r.description && <div style={{ fontSize: 12, color: '#64748b' }}>{r.description}</div>}
-        </>
+          {r.description && (
+            <div
+              style={{
+                fontSize: 12,
+                color: '#64748b',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: 320,
+              }}
+              title={r.description}
+            >
+              {r.description}
+            </div>
+          )}
+        </div>
       ),
     },
     { title: 'Loài', dataIndex: 'species_scope', render: (v) => <Tag color="purple">{SPECIES[v] || v}</Tag> },
@@ -441,21 +536,51 @@ export default function Catalog() {
       render: (_, r) => `${r.items?.reduce((a, i) => a + (i.duration_minutes || 0), 0) || 0} phút`,
     },
     {
+      title: 'Trạng thái',
+      dataIndex: 'is_active',
+      width: 130,
+      align: 'center',
+      render: (active) => (
+        active ? (
+          <Tag color="success">Đang cung cấp</Tag>
+        ) : (
+          <Tag color="default">Đã ẩn</Tag>
+        )
+      ),
+    },
+    {
       title: 'Thao tác',
       key: 'act',
-      width: 140,
+      width: isManager ? 140 : 90,
       align: 'center',
       render: (_, r) => (
-        <div onClick={(e) => e.stopPropagation()}>
+        <Space size={6} onClick={(e) => e.stopPropagation()}>
           <Button
-            block
             size="small"
             icon={<EyeOutlined />}
-            onClick={(e) => { e.stopPropagation(); setDetailItem({ type: 'package', data: r }) }}
+            onClick={() => setDetailItem({ type: 'package', data: r })}
           >
             Chi tiết
           </Button>
-        </div>
+          {isManager && (
+            r.is_active ? (
+              <Tooltip title="Cần ẩn gói combo trước khi có thể xóa">
+                <span>
+                  <Button size="small" danger disabled icon={<DeleteOutlined />} />
+                </span>
+              </Tooltip>
+            ) : (
+              <Tooltip title="Xóa vĩnh viễn gói combo này">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => openDeleteConfirm(r, 'package')}
+                />
+              </Tooltip>
+            )
+          )}
+        </Space>
       ),
     },
   ]
@@ -504,7 +629,10 @@ export default function Catalog() {
       <Card style={{ borderRadius: 8 }}>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={(tab) => {
+            setActiveTab(tab)
+            setDetailItem(null)
+          }}
           items={[
             {
               key: 's',
@@ -538,9 +666,24 @@ export default function Catalog() {
                         ]}
                         style={{ width: 145 }}
                       />
+                      <Segmented
+                        value={serviceStatusFilter}
+                        onChange={(value) => {
+                          setServiceStatusFilter(value)
+                          setServicePage(1)
+                          setDetailItem(null)
+                        }}
+                        options={[
+                          { label: `Tất cả (${serviceCounts.all})`, value: 'all' },
+                          { label: `Đang cung cấp (${serviceCounts.active})`, value: 'active' },
+                          { label: `Đã ẩn (${serviceCounts.hidden})`, value: 'hidden' },
+                        ]}
+                      />
                     </Space>
-                    <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem bảng giá size</Text>
-                    <RowPerPageSelect value={servicePageSize} onChange={(ps) => { setServicePageSize(ps); setServicePage(1); }} />
+                    <Space wrap size={8}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem bảng giá size</Text>
+                      <RowPerPageSelect value={servicePageSize} onChange={(ps) => { setServicePageSize(ps); setServicePage(1); }} />
+                    </Space>
                   </div>
                   <Table
                     rowKey="id"
@@ -588,10 +731,34 @@ export default function Catalog() {
                         ]}
                         style={{ width: 145 }}
                       />
+                      <Segmented
+                        value={packageStatusFilter}
+                        onChange={(value) => {
+                          setPackageStatusFilter(value)
+                          setPackagePage(1)
+                          setDetailItem(null)
+                        }}
+                        options={[
+                          { label: `Tất cả (${packageCounts.all})`, value: 'all' },
+                          { label: `Đang cung cấp (${packageCounts.active})`, value: 'active' },
+                          { label: `Đã ẩn (${packageCounts.hidden})`, value: 'hidden' },
+                        ]}
+                      />
                     </Space>
-                    <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem chi tiết gói</Text>
-                    <RowPerPageSelect value={packagePageSize} onChange={(ps) => { setPackagePageSize(ps); setPackagePage(1); }} />
+                    <Space wrap size={8}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Bấm vào dòng để xem chi tiết gói</Text>
+                      <RowPerPageSelect value={packagePageSize} onChange={(ps) => { setPackagePageSize(ps); setPackagePage(1); }} />
+                    </Space>
                   </div>
+                  {packageStatusFilter === 'hidden' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Danh sách các gói combo đang bị ẩn"
+                      description="Các gói combo này đã bị ẩn khỏi danh mục đặt lịch mới. Bạn có thể bấm 'Chi tiết' để hiển thị lại hoặc xóa vĩnh viễn khi không còn nhu cầu sử dụng."
+                    />
+                  )}
                   <Table
                     rowKey="id"
                     loading={loading}
@@ -791,83 +958,146 @@ export default function Catalog() {
       {/* ===== DRAWER XEM CHI TIẾT DỊCH VỤ / GÓI COMBO ===== */}
       <Drawer
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <ShopOutlined style={{ color: '#0f8b8d', fontSize: 20 }} />
-            <div>
-              <Typography.Text strong style={{ fontSize: 16 }}>
-                {detailItem?.type === 'package' ? 'Chi tiết gói combo' : 'Chi tiết dịch vụ spa'}: {detailItem?.data?.name}
-              </Typography.Text>
-              {detailItem?.type === 'package' && (
-                <div>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    Mã: {detailItem.data.code}
+          detailItem ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <ShopOutlined style={{ color: '#0f8b8d', fontSize: 22, flexShrink: 0 }} />
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <Typography.Text strong style={{ fontSize: 17, color: '#0b3d3f' }}>
+                    {detailItem.data?.name}
                   </Typography.Text>
+                  {detailItem.data?.is_active ? (
+                    <Tag color="success">Đang cung cấp</Tag>
+                  ) : (
+                    <Tag color="default">Đang tạm ẩn</Tag>
+                  )}
                 </div>
-              )}
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                  {detailItem.type === 'package'
+                    ? `Gói combo trọn gói · Mã: ${detailItem.data?.code}`
+                    : `Dịch vụ spa · Phân nhóm: ${CATEGORY[detailItem.data?.category] || detailItem.data?.category || ''}`}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : null
         }
         open={!!detailItem}
         onClose={() => setDetailItem(null)}
-        width={560}
-        extra={
-          <Space>
-            {isManager && detailItem?.type === 'service' && detailItem.data.is_active && (
-              <Popconfirm
-                title="Ẩn dịch vụ này khỏi danh mục?"
-                description="Dịch vụ sẽ không còn dùng để đặt lịch mới; lịch sử cũ vẫn được giữ."
-                okText="Ẩn dịch vụ"
-                cancelText="Hủy"
-                onConfirm={() => deleteService(detailItem.data)}
-              >
-                <Button danger icon={<DeleteOutlined />}>Ẩn dịch vụ</Button>
-              </Popconfirm>
-            )}
-            {isManager && detailItem?.type === 'service' && !detailItem.data.is_active && (
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={() => restoreService(detailItem.data)}
-              >
-                Hiện lại dịch vụ
-              </Button>
-            )}
-            {isManager && detailItem?.type === 'package' && detailItem.data.is_active && (
-              <Popconfirm
-                title="Ẩn gói combo này khỏi danh mục?"
-                description="Gói sẽ không còn được chọn cho đặt lịch mới; lịch sử cũ vẫn được giữ."
-                okText="Ẩn gói"
-                cancelText="Hủy"
-                onConfirm={() => setPackageActive(detailItem.data, false)}
-              >
-                <Button danger icon={<DeleteOutlined />}>Ẩn gói</Button>
-              </Popconfirm>
-            )}
-            {isManager && detailItem?.type === 'package' && !detailItem.data.is_active && (
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={() => setPackageActive(detailItem.data, true)}
-              >
-                Hiện lại gói
-              </Button>
-            )}
-            {isManager && (
-              <Button
-                icon={<EditOutlined />}
-                onClick={() => {
-                  if (detailItem.type === 'package') openEditPackage(detailItem.data)
-                  else openEditService(detailItem.data)
-                }}
-              >
-                {detailItem?.type === 'package' ? 'Sửa thành phần' : 'Sửa dịch vụ'}
-              </Button>
-            )}
-          </Space>
+        width={620}
+        footer={
+          detailItem && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+              <Button onClick={() => setDetailItem(null)}>Đóng</Button>
+            </div>
+          )
         }
       >
         {detailItem && (
           <div>
+            {/* ===== THANH THAO TÁC QUẢN LÝ (ĐẶT TRÊN HÀNG RIÊNG BIỆT, KHÔNG BỊ CHÈN ÉP UI) ===== */}
+            {isManager && (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                  marginBottom: 18,
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>
+                    Thao tác quản lý:
+                  </Typography.Text>
+                </div>
+                <Space wrap size={8}>
+                  {/* Nút Ẩn / Hiện Dịch vụ */}
+                  {detailItem.type === 'service' && detailItem.data.is_active && (
+                    <Popconfirm
+                      title="Ẩn dịch vụ này khỏi danh mục?"
+                      description="Dịch vụ sẽ không còn dùng để đặt lịch mới; lịch sử cũ vẫn được giữ."
+                      okText="Ẩn dịch vụ"
+                      cancelText="Hủy"
+                      onConfirm={() => setServiceActive(detailItem.data, false)}
+                    >
+                      <Button icon={<EyeInvisibleOutlined />} style={{ color: '#d97706', borderColor: '#fcd34d' }}>
+                        Ẩn dịch vụ
+                      </Button>
+                    </Popconfirm>
+                  )}
+                  {detailItem.type === 'service' && !detailItem.data.is_active && (
+                    <Button
+                      type="primary"
+                      icon={<EyeOutlined />}
+                      style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                      onClick={() => setServiceActive(detailItem.data, true)}
+                    >
+                      Hiện lại dịch vụ
+                    </Button>
+                  )}
+
+                  {/* Nút Ẩn / Hiện Gói combo */}
+                  {detailItem.type === 'package' && detailItem.data.is_active && (
+                    <Popconfirm
+                      title="Ẩn gói combo này khỏi danh mục?"
+                      description="Gói sẽ không còn được chọn cho đặt lịch mới; lịch sử cũ vẫn được giữ."
+                      okText="Ẩn gói combo"
+                      cancelText="Hủy"
+                      onConfirm={() => setPackageActive(detailItem.data, false)}
+                    >
+                      <Button icon={<EyeInvisibleOutlined />} style={{ color: '#d97706', borderColor: '#fcd34d' }}>
+                        Ẩn gói combo
+                      </Button>
+                    </Popconfirm>
+                  )}
+                  {detailItem.type === 'package' && !detailItem.data.is_active && (
+                    <Button
+                      type="primary"
+                      icon={<EyeOutlined />}
+                      style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                      onClick={() => setPackageActive(detailItem.data, true)}
+                    >
+                      Hiện lại gói combo
+                    </Button>
+                  )}
+
+                  {/* Nút Xóa (bắt buộc phải ẩn mới xóa được) */}
+                  {detailItem.data.is_active ? (
+                    <Tooltip title={`Cần ẩn ${detailItem.type === 'service' ? 'dịch vụ' : 'gói combo'} trước khi có thể xóa`}>
+                      <span>
+                        <Button danger disabled icon={<DeleteOutlined />}>
+                          Xóa {detailItem.type === 'service' ? 'dịch vụ' : 'gói'}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                  ) : (
+                    <Button
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => openDeleteConfirm(detailItem.data, detailItem.type)}
+                    >
+                      Xóa {detailItem.type === 'service' ? 'dịch vụ' : 'gói'}
+                    </Button>
+                  )}
+
+                  {/* Nút Sửa */}
+                  <Button
+                    icon={<EditOutlined />}
+                    onClick={() => {
+                      if (detailItem.type === 'package') openEditPackage(detailItem.data)
+                      else openEditService(detailItem.data)
+                    }}
+                  >
+                    {detailItem.type === 'package' ? 'Sửa thành phần' : 'Sửa dịch vụ'}
+                  </Button>
+                </Space>
+              </div>
+            )}
             <Descriptions bordered column={2} size="small" style={{ marginBottom: 20 }}>
               <Descriptions.Item label="Tên dịch vụ/gói" span={2}>
                 <strong style={{ fontSize: 16, color: '#0f8b8d' }}>{detailItem.data.name}</strong>
@@ -971,6 +1201,51 @@ export default function Catalog() {
           </div>
         )}
       </Drawer>
+
+      {/* ===== MODAL XÁC NHẬN XÓA DỊCH VỤ / GÓI COMBO ===== */}
+      <Modal
+        open={!!deleteTarget}
+        onCancel={() => !deleteBusy && setDeleteTarget(null)}
+        onOk={handleConfirmDelete}
+        confirmLoading={deleteBusy}
+        okText="Xác nhận xóa vĩnh viễn"
+        cancelText="Hủy bỏ"
+        okButtonProps={{ danger: true }}
+        centered
+        title={
+          <Space style={{ color: '#ff4d4f' }}>
+            <ExclamationCircleOutlined style={{ fontSize: 20 }} />
+            <span style={{ fontWeight: 600 }}>
+              Xác nhận xóa vĩnh viễn {deleteTarget?.type === 'service' ? 'dịch vụ' : 'gói combo'}
+            </span>
+          </Space>
+        }
+      >
+        {deleteTarget && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 14 }}>
+              Bạn có chắc chắn muốn xóa vĩnh viễn{' '}
+              {deleteTarget.type === 'service' ? 'dịch vụ' : 'gói combo'}{' '}
+              <Text strong style={{ color: '#0f8b8d', fontSize: 15 }}>
+                "{deleteTarget.target.name}"
+              </Text>
+              {deleteTarget.target.code ? ` (Mã: ${deleteTarget.target.code})` : ''}?
+            </p>
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="Lưu ý thao tác không thể hoàn tác"
+              description={
+                deleteTarget.type === 'service'
+                  ? "Hành động này sẽ xóa dữ liệu dịch vụ khỏi hệ thống. Nếu dịch vụ này đã từng có lịch hẹn phát sinh trong quá khứ hoặc nằm trong gói combo, hệ thống sẽ bảo vệ dữ liệu và không thể xóa vĩnh viễn. Trong trường hợp đó, hãy giữ dịch vụ ở trạng thái 'Đã ẩn'."
+                  : "Hành động này sẽ xóa hoàn toàn gói combo này khỏi hệ thống."
+              }
+            />
+          </div>
+        )}
+      </Modal>
+
     </>
   )
 }

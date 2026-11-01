@@ -1,11 +1,12 @@
 from datetime import datetime, time, timedelta
 
 from django.db import transaction
+from django.db.models import ProtectedError
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 
@@ -147,17 +148,27 @@ class StaffViewSet(viewsets.ModelViewSet):
         p = self.request.query_params
         if p.get('role'):
             qs = qs.filter(user__role=p['role'])
-        if self.action == 'list' and p.get('include_inactive') != '1':
+        active_status = p.get('active_status')
+        if active_status == 'active':
+            qs = qs.filter(is_active=True)
+        elif active_status == 'hidden':
+            qs = qs.filter(is_active=False)
+        elif self.action == 'list' and p.get('include_inactive') != '1':
             qs = qs.filter(is_active=True)
         return qs
 
     def perform_destroy(self, instance):
         if instance.user_id == self.request.user.id:
-            raise PermissionDenied('Bạn không thể tự khóa tài khoản của chính mình.')
-        instance.is_active = False
-        instance.user.is_active = False
-        instance.user.save(update_fields=['is_active'])
-        instance.save(update_fields=['is_active'])
+            raise PermissionDenied('Bạn không thể tự xóa tài khoản của chính mình.')
+        if instance.is_active:
+            raise ValidationError({'detail': 'Chỉ có thể xóa nhân sự đã bị khóa/ẩn. Vui lòng khóa tài khoản nhân sự trước khi xóa.'})
+        try:
+            user = instance.user
+            instance.delete()
+            if user:
+                user.delete()
+        except ProtectedError:
+            raise ValidationError({'detail': 'Không thể xóa vĩnh viễn nhân sự này do đã có dữ liệu lịch hẹn hoặc phân ca liên quan. Hãy tiếp tục giữ ở trạng thái khóa/ẩn.'})
 
     def perform_update(self, serializer):
         if serializer.validated_data.get('is_active') is False and serializer.instance.user_id == self.request.user.id:
@@ -449,16 +460,22 @@ class ResourceViewSet(viewsets.ModelViewSet):
         from rest_framework.exceptions import ValidationError
         from scheduling.models import ACTIVE_STATUSES, BookingItem
 
+        if instance.is_active:
+            raise ValidationError({'detail': f'Chỉ có thể xóa cơ sở vật chất đã ở trạng thái tạm ngưng/ẩn. Vui lòng tạm ngưng "{instance.name}" trước khi xóa.'})
+
         active_bookings_count = BookingItem.objects.filter(
             resource=instance,
             booking__status__in=ACTIVE_STATUSES,
             end_at__gte=timezone.now()
         ).count()
         if active_bookings_count > 0:
-            raise ValidationError(
-                f'Không thể xóa cơ sở vật chất "{instance.name}" vì đang có {active_bookings_count} lịch hẹn sắp tới đang sử dụng. Vui lòng chuyển sang "Tạm ngưng" hoặc dời lịch trước.'
-            )
-        instance.delete()
+            raise ValidationError({
+                'detail': f'Không thể xóa cơ sở vật chất "{instance.name}" vì đang có {active_bookings_count} lịch hẹn sắp tới đang sử dụng. Vui lòng dời lịch trước.'
+            })
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({'detail': f'Không thể xóa cơ sở vật chất "{instance.name}" do có dữ liệu liên kết. Hãy tiếp tục giữ ở trạng thái tạm ngưng.'})
 
     @action(detail=False, methods=['get'])
     def occupancy(self, request):

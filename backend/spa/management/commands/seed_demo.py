@@ -117,8 +117,8 @@ BOOKINGS = [
     ('Tuyết', 'cat_care', [], -6, 9, 'ktv3', 'completed', True),
     ('Nu', None, ['bath_basic', 'nail_trim'], -4, 15, 'ktv1', 'completed', True),
     ('Bắp', None, ['bath_unscented'], -3, 10, 'ktv1', 'completed', False),
-    ('Mimi', None, ['cat_spa'], -2, 11, 'ktv3', 'completed', True),
     ('Gạo', None, ['cat_spa'], -5, 13, 'ktv3', 'cancelled', False),
+    ('Mimi', None, ['cat_spa'], 0, 8, 'ktv3', 'completed', True),
     ('Tít', None, ['bath_basic', 'blow_dry'], 0, 9, 'ktv1', 'in_progress', False),
     ('Sữa', None, ['cat_spa'], 0, 16, 'ktv3', 'confirmed', False),
     ('Bông', 'vip', [], 1, 10, None, 'pending', False),
@@ -294,7 +294,7 @@ class Command(BaseCommand):
             pet = Pet.objects.filter(name=pet_name).first()
             pkg = Package.objects.get(code=pkg_code) if pkg_code else None
             svc_ids = [Service.objects.get(code=c).pk for c in svc_codes] or None
-            start = timezone.make_aware(datetime.combine(date.today() + timedelta(days=offset), time(hour, 0)), tz)
+            start = timezone.make_aware(datetime.combine(timezone.localdate() + timedelta(days=offset), time(hour, 0)), tz)
             package, items, total, end_at = build_items(pet, pkg.pk if pkg else None, svc_ids, start)
             staff = StaffProfile.objects.get(user__username=ktv) if ktv else None
             b = Booking.objects.create(
@@ -311,7 +311,11 @@ class Command(BaseCommand):
                     it.save(update_fields=['resource'])
                 b.checked_in_at = start
             if status == 'completed':
-                b.completed_at, b.checked_out_at = end_at, end_at
+                b.completed_at = end_at
+                if offset != 0:
+                    b.checked_out_at = end_at
+                else:
+                    b.checked_out_at = None
             b.save()
             if status == 'completed':
                 inv = billing_services.create_invoice(b)
@@ -320,14 +324,22 @@ class Command(BaseCommand):
                     Invoice.objects.filter(pk=inv.pk).update(paid_at=end_at)
 
     def _walk_ins(self):
-        """Dữ liệu hàng đợi khách vãng lai mẫu trong ngày (SPA-18)."""
-        from scheduling.models import WalkInTicket, WalkInStatus
+        """Dữ liệu hàng đợi khách vãng lai mẫu trong ngày."""
+        from scheduling.models import WalkInTicket, WalkInStatus, Booking
         from catalog.models import Service, Package
+        from customers.models import Client, Pet
         WalkInTicket.objects.all().delete()
         today = timezone.localdate()
-        s_bath = Service.objects.filter(code='bath_basic').first()
-        s_cat = Service.objects.filter(code='cat_spa').first()
-        pkg_vip = Package.objects.filter(code='vip').first()
+        s_bath = Service.objects.filter(code='bath_basic').first() or Service.objects.first()
+        s_cat = Service.objects.filter(code='cat_spa').first() or s_bath
+        pkg_vip = Package.objects.filter(code='vip').first() or Package.objects.first()
+
+        c_ha = Client.objects.filter(full_name__icontains='Thu Hà').first() or Client.objects.first()
+        p_mimi = c_ha.pets.first() if c_ha else None
+
+        c_nam = Client.objects.filter(full_name__icontains='Hoài Nam').first()
+        p_bo = c_nam.pets.first() if c_nam else None
+        b_nam = Booking.objects.filter(client=c_nam).first() if c_nam else None
 
         now = timezone.now()
         WalkInTicket.objects.create(
@@ -342,9 +354,21 @@ class Command(BaseCommand):
             estimated_wait_minutes=15, note='Mèo sợ nước, dặn KTV nhẹ tay'
         )
         WalkInTicket.objects.create(
-            date=today, queue_no=3, contact_name='Anh Dũng', phone='0909090909',
-            pet_name='Bé Cún', pet_species='dog', package=pkg_vip, status=WalkInStatus.WAITING,
-            estimated_wait_minutes=35, note='Khách mới lần đầu đến spa'
+            date=today, queue_no=3, client=c_ha, contact_name=c_ha.full_name if c_ha else 'Nguyễn Thu Hà',
+            phone=c_ha.phone if c_ha else '0901234567', pet=p_mimi, pet_name=p_mimi.name if p_mimi else 'Mimi',
+            pet_species=p_mimi.species if p_mimi else 'cat', package=pkg_vip, status=WalkInStatus.WAITING,
+            estimated_wait_minutes=30, note='Khách quen ghé quầy không đặt trước'
+        )
+        WalkInTicket.objects.create(
+            date=today, queue_no=4, client=c_nam, contact_name=c_nam.full_name if c_nam else 'Đặng Hoài Nam',
+            phone=c_nam.phone if c_nam else '0866789012', pet=p_bo, pet_name=p_bo.name if p_bo else 'Bơ',
+            pet_species=p_bo.species if p_bo else 'dog', service=s_bath, booking=b_nam, status=WalkInStatus.SERVED,
+            served_at=now - timedelta(minutes=45), note='Đã tiếp nhận vào bàn phục vụ'
+        )
+        WalkInTicket.objects.create(
+            date=today, queue_no=5, contact_name='Anh Dũng', phone='0909090909',
+            pet_name='Bé Cún', pet_species='dog', service=s_bath, status=WalkInStatus.LEFT,
+            left_at=now - timedelta(minutes=20), note='Khách bận việc đột xuất nên xin phép rời đi'
         )
 
     def _ai_data(self):

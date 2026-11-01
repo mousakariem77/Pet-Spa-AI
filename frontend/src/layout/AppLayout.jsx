@@ -170,7 +170,7 @@ export default function AppLayout() {
       nav(n.ref_id ? `/app/lich-hen?id=${n.ref_id}` : '/app/lich-hen')
     } else if (n.ref_type === 'invoice') {
       nav(n.ref_id ? `/app/hoa-don?id=${n.ref_id}` : '/app/hoa-don')
-    } else if (n.ref_type === 'reminder') {
+    } else if (['reminder', 'rebook', 'rebook_reminder'].includes(n.ref_type)) {
       nav('/app/nhac-tai-spa')
     } else if (n.ref_type === 'client' || n.ref_type === 'customer') {
       nav('/app/khach-hang')

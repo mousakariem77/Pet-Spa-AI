@@ -14,12 +14,14 @@ import {
   PlusOutlined, ReloadOutlined, RightOutlined, RobotOutlined,
   SafetyCertificateOutlined, SearchOutlined, ShopOutlined, SmileFilled,
   SyncOutlined, TeamOutlined, ThunderboltFilled, UserOutlined, WarningFilled,
+  BarChartOutlined, PieChartOutlined, RiseOutlined, FieldTimeOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { api, money, unwrap } from '../api.js'
 import { useAuth } from '../auth.jsx'
 import PetAvatar from '../components/PetAvatar.jsx'
+import RowPerPageSelect from '../components/RowPerPageSelect.jsx'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -57,11 +59,16 @@ export default function Home() {
   const [myInvoices, setMyInvoices] = useState([])
   const [myReminders, setMyReminders] = useState([])
 
-  // Bộ lọc feed hôm nay cho Lễ tân
+  // Bộ lọc feed và phân trang cho Lễ tân
   const [feedTab, setFeedTab] = useState('all')
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [pageSize, setPageSize] = useState(10)
   const [detailBooking, setDetailBooking] = useState(null)
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false)
+
+  // Bộ lọc biểu đồ giờ
+  const [hourlyMetric, setHourlyMetric] = useState('all') // 'all' | 'in_progress' | 'completed'
+  const [hoveredHour, setHoveredHour] = useState(null)
 
   const loadData = async (targetDate = selectedDate) => {
     setLoading(true)
@@ -180,19 +187,14 @@ export default function Home() {
   // Tính toán tóm tắt cho Khách hàng
   const customerStats = useMemo(() => {
     if (!isCustomer) return null
-    // Bé đang có mặt tại spa (đang làm hoặc vừa check-in)
     const activeAtSpa = myBookings.find((b) => ['checked_in', 'in_progress'].includes(b.status))
-    // Lịch sắp tới
     const upcoming = myBookings
       .filter((b) => ['pending', 'confirmed'].includes(b.status))
       .sort((a, b) => dayjs(a.start_at).diff(dayjs(b.start_at)))
-    // Lịch đã hoàn thành
     const completed = myBookings.filter((b) => b.status === 'completed')
-    // Tổng chi tiêu thực tế
     const totalSpent = myInvoices
       .filter((i) => i.status === 'paid')
       .reduce((sum, i) => sum + Number(i.total || 0), 0)
-    // Hóa đơn chưa thanh toán
     const unpaidInv = myInvoices.filter((i) => i.status === 'unpaid')
 
     return {
@@ -204,8 +206,66 @@ export default function Home() {
     }
   }, [isCustomer, myPets, myBookings, myInvoices])
 
+  // Tính toán dữ liệu biểu đồ phân bổ giờ
+  const hourlyData = useMemo(() => {
+    if (!dashboardData) return []
+    if (dashboardData.hourly_distribution && dashboardData.hourly_distribution.length > 0) {
+      return dashboardData.hourly_distribution
+    }
+    // Fallback tính từ feed nếu backend chưa gửi
+    const hours = {}
+    for (let h = 8; h <= 18; h++) {
+      const hStr = `${String(h).padStart(2, '0')}:00`
+      hours[hStr] = { hour: hStr, count: 0, completed: 0, in_progress: 0, confirmed: 0, pending: 0 }
+    }
+    (dashboardData.feed || []).forEach((b) => {
+      const h = dayjs(b.start_at).hour()
+      const hStr = `${String(h).padStart(2, '0')}:00`
+      if (hours[hStr]) {
+        hours[hStr].count += 1
+        if (b.status === 'completed') hours[hStr].completed += 1
+        else if (['in_progress', 'checked_in'].includes(b.status)) hours[hStr].in_progress += 1
+        else if (b.status === 'confirmed') hours[hStr].confirmed += 1
+        else if (b.status === 'pending') hours[hStr].pending += 1
+      }
+    })
+    return Object.values(hours)
+  }, [dashboardData])
+
+  // Tìm khung giờ cao điểm
+  const peakHour = useMemo(() => {
+    if (!hourlyData.length) return null
+    let max = hourlyData[0]
+    for (const h of hourlyData) {
+      if (h.count > max.count) max = h
+    }
+    return max.count > 0 ? max : null
+  }, [hourlyData])
+
+  // Thống kê cơ cấu trạng thái
+  const statusBreakdown = useMemo(() => {
+    if (!dashboardData?.counts) return []
+    const total = dashboardData.total_bookings || 1
+    const items = [
+      { key: 'completed', label: 'Đã hoàn tất', count: dashboardData.counts.completed || 0, color: '#10b981' },
+      { key: 'in_progress', label: 'Đang chăm sóc', count: dashboardData.counts.in_progress || 0, color: '#f97316' },
+      { key: 'checked_in', label: 'Đã đến quầy', count: dashboardData.counts.checked_in || 0, color: '#06b6d4' },
+      { key: 'confirmed', label: 'Đã xác nhận', count: dashboardData.counts.confirmed || 0, color: '#0f8b8d' },
+      { key: 'pending', label: 'Chờ duyệt', count: dashboardData.counts.pending || 0, color: '#f59e0b' },
+      { key: 'cancelled', label: 'Đã hủy/Vắng', count: (dashboardData.counts.cancelled || 0) + (dashboardData.counts.no_show || 0), color: '#94a3b8' },
+    ]
+    return items.map((it) => ({
+      ...it,
+      percent: Math.round((it.count / total) * 100),
+    }))
+  }, [dashboardData])
+
   if (loading && !dashboardData && !spa && myPets.length === 0) {
-    return <Skeleton active paragraph={{ rows: 10 }} />
+    return (
+      <div style={{ padding: '8px 0' }}>
+        <Skeleton active paragraph={{ rows: 12 }} />
+      </div>
+    )
   }
 
   if (!spa) {
@@ -250,7 +310,7 @@ export default function Home() {
             <PetAvatar species={pet?.species} size={38} style={{ border: '2px solid #e2e8f0' }} />
             <Space direction="vertical" size={2}>
               <Space>
-                <Text strong style={{ fontSize: 15, color: '#0f8b8d' }}>
+                <Text strong style={{ fontSize: 14, color: '#0f8b8d' }}>
                   🐾 {pet?.name || 'Bé cưng'}
                 </Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>
@@ -258,7 +318,6 @@ export default function Home() {
                 </Text>
               </Space>
 
-              {/* Cảnh báo an toàn cho bé */}
               <Space wrap size={4}>
                 {hasBite && <Tag color="error">⚠️ Hay cắn / Hung dữ</Tag>}
                 {hasAllergy && <Tag color="warning">🌸 {pet.allergy_note}</Tag>}
@@ -291,7 +350,7 @@ export default function Home() {
       ),
     },
     {
-      title: 'Dịch vụ & Tài nguyên',
+      title: 'Dịch vụ & Gói',
       key: 'service',
       render: (_, record) => (
         <div>
@@ -442,159 +501,156 @@ export default function Home() {
     },
   ]
 
+  // Tính toán tối đa cho biểu đồ giờ
+  const maxHourlyVal = Math.max(
+    ...hourlyData.map((h) => {
+      if (hourlyMetric === 'in_progress') return h.in_progress
+      if (hourlyMetric === 'completed') return h.completed
+      return h.count
+    }),
+    1
+  )
+
+  // Tính chu vi SVG Donut
+  const donutRadius = 60
+  const donutCircumference = 2 * Math.PI * donutRadius
+  let cumulativeOffset = 0
+
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-      {/* ===== HERO BANNER ===== */}
-      <Card
-        style={{
-          borderRadius: 16,
-          marginBottom: 20,
-          background: 'linear-gradient(135deg, #094d4e 0%, #0f8b8d 50%, #1bb2b5 100%)',
-          color: '#fff',
-          boxShadow: '0 8px 24px rgba(15, 139, 141, 0.22)',
-          border: 'none',
-        }}
-        bodyStyle={{ padding: '20px 24px' }}
-      >
-        <Row justify="space-between" align="middle" gutter={[16, 16]}>
-          <Col xs={24} md={13}>
-            <Space direction="vertical" size={4}>
-              <Space align="center" wrap>
-                <Title level={3} style={{ color: '#fff', margin: 0 }}>
-                  Xin chào, {user?.full_name || user?.username}! 👋
-                </Title>
-                <Tag
-                  color="#faad14"
-                  style={{
-                    fontWeight: 700,
-                    borderRadius: 12,
-                    padding: '2px 10px',
-                    color: '#1a1a1a',
-                  }}
-                >
-                  {isManager
-                    ? 'Quản lý điều hành'
-                    : isFrontDesk
-                    ? 'Lễ tân tiếp đón'
-                    : isTech
-                    ? 'Kỹ thuật viên'
-                    : 'Khách hàng thân thiết'}
-                </Tag>
-              </Space>
-              <Text style={{ color: 'rgba(255, 255, 255, 0.88)', fontSize: 14 }}>
-                {spa.name} — {spa.address}
-              </Text>
-            </Space>
-          </Col>
+    <div style={{ paddingBottom: 40 }}>
+      {/* ===== 1. TIÊU ĐỀ TRANG & BỘ LỌC THỜI GIAN (ĐỒNG BỘ UI TOÀN HỆ THỐNG) ===== */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <Space align="center" size={10} wrap>
+            <Title level={3} style={{ margin: 0 }}>
+              {isFrontDesk ? 'Tổng Quan Hoạt Động Spa' : isCustomer ? 'Trung Tâm Khách Hàng' : 'Bàn Làm Việc Kỹ Thuật Viên'}
+            </Title>
+            <Tag
+              color="#0f8b8d"
+              style={{
+                fontWeight: 700,
+                borderRadius: 12,
+                padding: '2px 10px',
+                color: '#fff',
+                border: 'none',
+              }}
+            >
+              {isManager
+                ? 'Quản lý điều hành'
+                : isFrontDesk
+                ? 'Lễ tân tiếp đón'
+                : isTech
+                ? 'Kỹ thuật viên'
+                : 'Khách hàng'}
+            </Tag>
+          </Space>
+          <Paragraph type="secondary" style={{ margin: '4px 0 0' }}>
+            Xin chào, <strong>{user?.full_name || user?.username}</strong>! 👋 · {spa.name} ({spa.address})
+          </Paragraph>
+        </div>
 
-          {/* Khối chọn ngày & Lối tắt cho Lễ tân / Quản lý */}
-          {isFrontDesk && (
-            <Col xs={24} md={11} style={{ textAlign: 'right' }}>
-              <Space wrap style={{ justifyContent: 'flex-end' }}>
-                <Button.Group>
-                  <Button
-                    icon={<LeftOutlined />}
-                    onClick={() => setSelectedDate((d) => d.subtract(1, 'day'))}
-                    title="Xem ngày trước"
-                  />
-                  <Button
-                    type={isToday ? 'primary' : 'default'}
-                    onClick={() => setSelectedDate(dayjs())}
-                    style={isToday ? { background: '#faad14', borderColor: '#faad14', color: '#000', fontWeight: 600 } : {}}
-                  >
-                    Hôm nay
-                  </Button>
-                  <Button
-                    icon={<RightOutlined />}
-                    onClick={() => setSelectedDate((d) => d.add(1, 'day'))}
-                    title="Xem ngày sau"
-                  />
-                </Button.Group>
+        {/* Khối chọn ngày & Lối tắt nhanh cho Lễ tân / Quản lý */}
+        {isFrontDesk && (
+          <Space wrap align="center" size={10}>
+            <Button.Group>
+              <Button
+                icon={<LeftOutlined />}
+                onClick={() => setSelectedDate((d) => d.subtract(1, 'day'))}
+                title="Xem ngày trước"
+              />
+              <Button
+                type={isToday ? 'primary' : 'default'}
+                onClick={() => setSelectedDate(dayjs())}
+                style={isToday ? { background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600 } : {}}
+              >
+                Hôm nay
+              </Button>
+              <Button
+                icon={<RightOutlined />}
+                onClick={() => setSelectedDate((d) => d.add(1, 'day'))}
+                title="Xem ngày sau"
+              />
+            </Button.Group>
 
-                <DatePicker
-                  value={selectedDate}
-                  onChange={(d) => d && setSelectedDate(d)}
-                  format="DD/MM/YYYY"
-                  allowClear={false}
-                  style={{ width: 135 }}
-                />
+            <DatePicker
+              value={selectedDate}
+              onChange={(d) => d && setSelectedDate(d)}
+              format="DD/MM/YYYY"
+              allowClear={false}
+              style={{ width: 140 }}
+            />
 
-                <Button
-                  icon={<ReloadOutlined spin={loading} />}
-                  onClick={() => loadData(selectedDate)}
-                >
-                  Làm mới
-                </Button>
+            <Button
+              icon={<ReloadOutlined spin={loading} />}
+              onClick={() => loadData(selectedDate)}
+              loading={loading}
+            >
+              Làm mới
+            </Button>
 
-                <Button
-                  type="primary"
-                  style={{ background: '#0f8b8d', borderColor: '#0f8b8d', color: '#fff', fontWeight: 600 }}
-                  icon={<DesktopOutlined />}
-                  onClick={() => nav('/app/bang-le-tan')}
-                >
-                  Bảng Lễ Tân
-                </Button>
-                <Button
-                  type="primary"
-                  style={{ background: '#faad14', borderColor: '#faad14', color: '#1a1a1a', fontWeight: 600 }}
-                  icon={<PlusOutlined />}
-                  onClick={() => nav('/app/lich-hen?action=new')}
-                >
-                  + Đặt lịch quầy
-                </Button>
-              </Space>
-            </Col>
-          )}
+            <Button
+              icon={<DesktopOutlined />}
+              onClick={() => nav('/app/bang-le-tan')}
+              style={{ color: '#0f8b8d', borderColor: '#0f8b8d' }}
+            >
+              Bảng Lễ Tân
+            </Button>
 
-          {/* Lối tắt nhanh cho Khách hàng */}
-          {isCustomer && (
-            <Col xs={24} md={11} style={{ textAlign: 'right' }}>
-              <Space wrap style={{ justifyContent: 'flex-end' }}>
-                <Button
-                  icon={<ReloadOutlined spin={loading} />}
-                  onClick={() => loadData()}
-                  style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)', background: 'transparent' }}
-                >
-                  Cập nhật
-                </Button>
-                <Button
-                  type="primary"
-                  style={{ background: '#faad14', borderColor: '#faad14', color: '#1a1a1a', fontWeight: 700 }}
-                  icon={<CalendarOutlined />}
-                  onClick={() => nav('/app/lich-hen')}
-                >
-                  + Đặt lịch chăm sóc
-                </Button>
-                <Button
-                  type="default"
-                  icon={<IdcardOutlined />}
-                  onClick={() => nav('/app/thu-cung')}
-                  style={{ fontWeight: 600 }}
-                >
-                  Hồ sơ bé cưng
-                </Button>
-              </Space>
-            </Col>
-          )}
-        </Row>
-      </Card>
+            <Button
+              type="primary"
+              style={{ background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600 }}
+              icon={<PlusOutlined />}
+              onClick={() => nav('/app/lich-hen?action=new')}
+            >
+              + Đặt lịch quầy
+            </Button>
+          </Space>
+        )}
+
+        {/* Lối tắt nhanh cho Khách hàng */}
+        {isCustomer && (
+          <Space wrap align="center" size={10}>
+            <Button
+              icon={<ReloadOutlined spin={loading} />}
+              onClick={() => loadData()}
+              loading={loading}
+            >
+              Cập nhật
+            </Button>
+            <Button
+              type="primary"
+              style={{ background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600 }}
+              icon={<CalendarOutlined />}
+              onClick={() => nav('/app/lich-hen')}
+            >
+              + Đặt lịch chăm sóc
+            </Button>
+            <Button
+              icon={<IdcardOutlined />}
+              onClick={() => nav('/app/thu-cung')}
+            >
+              Hồ sơ bé cưng
+            </Button>
+          </Space>
+        )}
+      </div>
 
       {/* ============================================================== */}
       {/* ===== GIAO DIỆN DÀNH CHO KHÁCH HÀNG (CUSTOMER DASHBOARD) ===== */}
       {/* ============================================================== */}
       {isCustomer && customerStats && (
         <div style={{ marginBottom: 24 }}>
-          {/* 1. THEO DÕI TRỰC TIẾP (LIVE TRACKER): BÉ ĐANG TẠI SPA */}
+          {/* 1. THEO DÕI TRỰC TIẾP: BÉ ĐANG TẠI SPA */}
           {customerStats.activeAtSpa && (
             <Card
               style={{
-                borderRadius: 16,
+                borderRadius: 14,
                 marginBottom: 20,
                 border: '2px solid #0f8b8d',
                 background: 'linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%)',
-                boxShadow: '0 8px 24px rgba(15, 139, 141, 0.14)',
+                boxShadow: '0 4px 16px rgba(15, 139, 141, 0.12)',
               }}
-              bodyStyle={{ padding: '20px 24px' }}
+              styles={{ body: { padding: '18px 22px' } }}
             >
               <Row justify="space-between" align="middle" gutter={[16, 16]}>
                 <Col xs={24} md={16}>
@@ -631,7 +687,6 @@ export default function Home() {
                       </Text>
                     </Paragraph>
 
-                    {/* Tiến trình các bước */}
                     <div style={{ marginTop: 14, maxWidth: 640 }}>
                       <Steps
                         size="small"
@@ -671,7 +726,7 @@ export default function Home() {
             </Card>
           )}
 
-          {/* 2. CẢNH BÁO TÁI SPA TỪ TRỢ LÝ AI (NẾU CÓ) */}
+          {/* 2. CẢNH BÁO TÁI SPA TỪ TRỢ LÝ AI */}
           {myReminders.length > 0 && (
             <Alert
               type="info"
@@ -704,9 +759,8 @@ export default function Home() {
             />
           )}
 
-          {/* 3. 4 THẺ CHỈ SỐ HOẠT ĐỘNG CỦA KHÁCH HÀNG */}
+          {/* 3. 4 THẺ CHỈ SỐ CỦA KHÁCH HÀNG */}
           <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-            {/* Số bé cưng */}
             <Col xs={12} sm={6} lg={6}>
               <Card
                 size="small"
@@ -732,7 +786,6 @@ export default function Home() {
               </Card>
             </Col>
 
-            {/* Lịch hẹn sắp tới */}
             <Col xs={12} sm={6} lg={6}>
               <Card
                 size="small"
@@ -760,7 +813,6 @@ export default function Home() {
               </Card>
             </Col>
 
-            {/* Lần spa đã xong */}
             <Col xs={12} sm={6} lg={6}>
               <Card
                 size="small"
@@ -786,7 +838,6 @@ export default function Home() {
               </Card>
             </Col>
 
-            {/* Tổng chi tiêu tích lũy */}
             <Col xs={12} sm={6} lg={6}>
               <Card
                 size="small"
@@ -816,7 +867,7 @@ export default function Home() {
             </Col>
           </Row>
 
-          {/* 4. HỒ SƠ CÁC BÉ CƯNG CỦA TÔI (MY PETS CARDS) */}
+          {/* 4. HỒ SƠ CÁC BÉ CƯNG CỦA TÔI */}
           <Card
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -835,8 +886,8 @@ export default function Home() {
                 </Button>
               </div>
             }
-            style={{ borderRadius: 16, marginBottom: 20 }}
-            bodyStyle={{ padding: '16px 20px' }}
+            style={{ borderRadius: 14, marginBottom: 20 }}
+            styles={{ body: { padding: '16px 20px' } }}
           >
             {myPets.length === 0 ? (
               <Empty
@@ -925,7 +976,7 @@ export default function Home() {
                 </Button>
               </div>
             }
-            style={{ borderRadius: 16, marginBottom: 20 }}
+            style={{ borderRadius: 14, marginBottom: 20 }}
           >
             {customerStats.upcoming.length === 0 ? (
               <Empty
@@ -1009,11 +1060,11 @@ export default function Home() {
       )}
 
       {/* ========================================================================= */}
-      {/* ===== GIAO DIỆN DÀNH CHO LỄ TÂN & QUẢN LÝ (DAILY DASHBOARD - SPA-20) ===== */}
+      {/* ===== GIAO DIỆN DÀNH CHO LỄ TÂN & QUẢN LÝ (DAILY DASHBOARD CHUYÊN NGHIỆP) ===== */}
       {/* ========================================================================= */}
       {isFrontDesk && dashboardData && (
         <div style={{ marginBottom: 24 }}>
-          {/* Cảnh báo các lịch cần chú ý gấp */}
+          {/* Cảnh báo các lịch cần chú ý gấp (Quá giờ hẹn hoặc chờ duyệt quá 24h) */}
           {dashboardData.needs_attention?.length > 0 && (
             <Alert
               type="error"
@@ -1068,150 +1119,252 @@ export default function Home() {
             />
           )}
 
-          {/* 5 Thẻ Chỉ số Điều hành Đầu ngày (KPI Cards) */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-            {/* Doanh thu thực thu */}
-            <Col xs={24} sm={12} lg={8} xl={true}>
+          {/* ===== 2. NĂM THẺ CHỈ SỐ ĐIỀU HÀNH ĐẦU NGÀY (KPI CARDS ĐỒNG BỘ UI) ===== */}
+          <Row gutter={[16, 16]}>
+            {/* KPI 1: Doanh thu thực thu */}
+            <Col xs={24} sm={12} lg={true}>
               <Card
-                size="small"
+                bordered={false}
                 hoverable
                 onClick={() => nav('/app/hoa-don?status=paid')}
                 style={{
                   borderRadius: 14,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                  background: 'linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%)',
+                  border: '1px solid #ccfbf1',
+                  height: '100%',
                   cursor: 'pointer',
-                  borderTop: '4px solid #0f8b8d',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
                 }}
+                styles={{ body: { padding: 18 } }}
               >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>Doanh thu thực thu ngày</Text>}
-                  value={money(dashboardData.revenue)}
-                  prefix={<DollarCircleFilled style={{ color: '#0f8b8d' }} />}
-                  valueStyle={{ color: '#0f8b8d', fontWeight: 800, fontSize: 22 }}
-                />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Khớp {dashboardData.paid_invoices} hóa đơn đã thu
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Doanh Thu Thực Thu Ngày
+                    </Text>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#0f8b8d', marginTop: 4 }}>
+                      {money(dashboardData.revenue)}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#ccfbf1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#0f8b8d',
+                      fontSize: 18,
+                    }}
+                  >
+                    <DollarCircleFilled />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(15,139,141,0.1)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary">
+                    Khớp <Text strong>{dashboardData.paid_invoices}</Text> hóa đơn đã thu
                   </Text>
                   <Tag color="cyan">Xem sổ quỹ →</Tag>
                 </div>
               </Card>
             </Col>
 
-            {/* Tổng số lịch hẹn */}
-            <Col xs={24} sm={12} lg={8} xl={true}>
+            {/* KPI 2: Tổng số lịch hẹn */}
+            <Col xs={24} sm={12} lg={true}>
               <Card
-                size="small"
+                bordered={false}
                 hoverable
                 onClick={() => setFeedTab('all')}
                 style={{
                   borderRadius: 14,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 100%)',
+                  border: '1px solid #dbeafe',
+                  height: '100%',
                   cursor: 'pointer',
-                  borderTop: '4px solid #2563eb',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
                 }}
+                styles={{ body: { padding: 18 } }}
               >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>Tổng lịch hẹn ngày</Text>}
-                  value={dashboardData.total_bookings}
-                  prefix={<CalendarFilled style={{ color: '#2563eb' }} />}
-                  valueStyle={{ color: '#2563eb', fontWeight: 800, fontSize: 22 }}
-                />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {dashboardData.counts?.completed || 0} xong · {dashboardData.counts?.in_progress || 0} đang làm
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Tổng Lịch Hẹn Ngày
+                    </Text>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#2563eb', marginTop: 4 }}>
+                      {dashboardData.total_bookings} <span style={{ fontSize: 14, fontWeight: 500 }}>ca</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#dbeafe',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#2563eb',
+                      fontSize: 18,
+                    }}
+                  >
+                    <CalendarFilled />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(37,99,235,0.1)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary">
+                    <Text strong style={{ color: '#10b981' }}>{dashboardData.counts?.completed || 0}</Text> xong · <Text strong style={{ color: '#f97316' }}>{dashboardData.counts?.in_progress || 0}</Text> đang làm
                   </Text>
                   <Tag color="blue">Xem tất cả</Tag>
                 </div>
               </Card>
             </Col>
 
-            {/* Đang phục vụ tại Spa */}
-            <Col xs={24} sm={12} lg={8} xl={true}>
+            {/* KPI 3: Bé đang tại Spa */}
+            <Col xs={24} sm={12} lg={true}>
               <Card
-                size="small"
+                bordered={false}
                 hoverable
                 onClick={() => setFeedTab('in_service')}
                 style={{
                   borderRadius: 14,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                  background: 'linear-gradient(135deg, #f5f3ff 0%, #ffffff 100%)',
+                  border: '1px solid #ede9fe',
+                  height: '100%',
                   cursor: 'pointer',
-                  borderTop: '4px solid #7c3aed',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
                 }}
+                styles={{ body: { padding: 18 } }}
               >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>Bé đang tại Spa</Text>}
-                  value={dashboardData.in_service_count || 0}
-                  prefix={<ThunderboltFilled style={{ color: '#7c3aed' }} />}
-                  valueStyle={{ color: '#7c3aed', fontWeight: 800, fontSize: 22 }}
-                />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {dashboardData.counts?.checked_in || 0} quầy · {dashboardData.counts?.in_progress || 0} bàn/bồn
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Bé Đang Tại Spa
+                    </Text>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#7c3aed', marginTop: 4 }}>
+                      {dashboardData.in_service_count || 0} <span style={{ fontSize: 14, fontWeight: 500 }}>bé</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#ede9fe',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#7c3aed',
+                      fontSize: 18,
+                    }}
+                  >
+                    <ThunderboltFilled />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(124,58,237,0.1)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary">
+                    {dashboardData.counts?.checked_in || 0} sảnh · {dashboardData.counts?.in_progress || 0} bàn/bồn
                   </Text>
                   <Tag color="purple">Đang phục vụ</Tag>
                 </div>
               </Card>
             </Col>
 
-            {/* Hàng chờ duyệt / Tiếp nhận */}
-            <Col xs={24} sm={12} lg={8} xl={true}>
+            {/* KPI 4: Chờ tiếp nhận / Duyệt */}
+            <Col xs={24} sm={12} lg={true}>
               <Card
-                size="small"
+                bordered={false}
                 hoverable
                 onClick={() => setFeedTab('pending_confirmed')}
                 style={{
                   borderRadius: 14,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                  background: 'linear-gradient(135deg, #fffbeb 0%, #ffffff 100%)',
+                  border: '1px solid #fef3c7',
+                  height: '100%',
                   cursor: 'pointer',
-                  borderTop: '4px solid #f59e0b',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
                 }}
+                styles={{ body: { padding: 18 } }}
               >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>Chờ tiếp nhận / Duyệt</Text>}
-                  value={dashboardData.counts?.pending || 0}
-                  prefix={<ClockCircleFilled style={{ color: '#f59e0b' }} />}
-                  valueStyle={{
-                    color: (dashboardData.counts?.pending || 0) > 0 ? '#f59e0b' : '#10b981',
-                    fontWeight: 800,
-                    fontSize: 22,
-                  }}
-                />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    + {dashboardData.counts?.confirmed || 0} sắp đến
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Chờ Tiếp Nhận / Duyệt
+                    </Text>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#d97706', marginTop: 4 }}>
+                      {(dashboardData.counts?.pending || 0) + (dashboardData.counts?.confirmed || 0)} <span style={{ fontSize: 14, fontWeight: 500 }}>ca</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#fef3c7',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#d97706',
+                      fontSize: 18,
+                    }}
+                  >
+                    <ClockCircleFilled />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(217,119,6,0.1)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary">
+                    <Text strong>{dashboardData.counts?.pending || 0}</Text> chờ duyệt · <Text strong>{dashboardData.counts?.confirmed || 0}</Text> sắp đến
                   </Text>
                   <Tag color="gold">Xử lý ngay</Tag>
                 </div>
               </Card>
             </Col>
 
-            {/* Hóa đơn chưa thu */}
-            <Col xs={24} sm={12} lg={8} xl={true}>
+            {/* KPI 5: Hóa đơn chưa thu */}
+            <Col xs={24} sm={12} lg={true}>
               <Card
-                size="small"
+                bordered={false}
                 hoverable
                 onClick={() => nav('/app/hoa-don?status=unpaid')}
                 style={{
                   borderRadius: 14,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                  background: 'linear-gradient(135deg, #fef2f2 0%, #ffffff 100%)',
+                  border: '1px solid #fee2e2',
+                  height: '100%',
                   cursor: 'pointer',
-                  borderTop: '4px solid #ef4444',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.04)',
                 }}
+                styles={{ body: { padding: 18 } }}
               >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>Hóa đơn chưa thu</Text>}
-                  value={dashboardData.unpaid_count}
-                  prefix={<ExclamationCircleFilled style={{ color: '#ef4444' }} />}
-                  valueStyle={{
-                    color: dashboardData.unpaid_count > 0 ? '#ef4444' : '#10b981',
-                    fontWeight: 800,
-                    fontSize: 22,
-                  }}
-                />
-                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Nợ: {money(dashboardData.unpaid_total)}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>
+                      Hóa Đơn Chưa Thu
+                    </Text>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#dc2626', marginTop: 4 }}>
+                      {dashboardData.unpaid_count} <span style={{ fontSize: 14, fontWeight: 500 }}>đơn</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#fee2e2',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#dc2626',
+                      fontSize: 18,
+                    }}
+                  >
+                    <ExclamationCircleFilled />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(220,38,38,0.1)', fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary" ellipsis style={{ maxWidth: 120 }}>
+                    Nợ: <Text strong style={{ color: '#dc2626' }}>{money(dashboardData.unpaid_total)}</Text>
                   </Text>
                   <Tag color="red">Thu ngân →</Tag>
                 </div>
@@ -1219,7 +1372,454 @@ export default function Home() {
             </Col>
           </Row>
 
-          {/* ===== BẢNG ĐIỀU PHỐI: FEED LỊCH HẸN TRONG NGÀY ===== */}
+          {/* ===== 3. CÁC BIỂU ĐỒ PHÂN TÍCH VẬN HÀNH ĐA DẠNG & LINH HOẠT ===== */}
+          <Row gutter={[16, 16]} style={{ marginTop: 20 }}>
+            {/* BIỂU ĐỒ 1: PHÂN BỔ CA THEO KHUNG GIỜ TRONG NGÀY (PEAK HOURS BAR CHART) */}
+            <Col xs={24} lg={15}>
+              <Card
+                title={
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <Space align="center">
+                      <BarChartOutlined style={{ color: '#0f8b8d', fontSize: 18 }} />
+                      <span style={{ fontWeight: 700 }}>Phân Bổ Lịch Hẹn Theo Khung Giờ Trong Ngày</span>
+                    </Space>
+                    <Segmented
+                      value={hourlyMetric}
+                      onChange={setHourlyMetric}
+                      options={[
+                        { label: 'Tất cả ca', value: 'all' },
+                        { label: 'Đang chăm sóc', value: 'in_progress' },
+                        { label: 'Đã hoàn tất', value: 'completed' },
+                      ]}
+                      size="small"
+                    />
+                  </div>
+                }
+                bordered={false}
+                style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', height: '100%' }}
+                styles={{ body: { padding: '16px 20px' } }}
+              >
+                {/* Thông báo khung giờ cao điểm */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 10,
+                    padding: '8px 14px',
+                    backgroundColor: '#f8fafc',
+                    borderRadius: 8,
+                    marginBottom: 16,
+                    fontSize: 12,
+                  }}
+                >
+                  <Space size={14} wrap>
+                    <div>
+                      <FieldTimeOutlined style={{ color: '#0f8b8d', marginRight: 4 }} />
+                      <Text type="secondary">Khung giờ mở cửa: </Text>
+                      <Text strong>{spa.open_time?.slice(0, 5)} – {spa.close_time?.slice(0, 5)}</Text>
+                    </div>
+                    {peakHour && (
+                      <div>
+                        <FireOutlined style={{ color: '#f59e0b', marginRight: 4 }} />
+                        <Text type="secondary">Khung giờ cao điểm: </Text>
+                        <Text strong style={{ color: '#d97706' }}>{peakHour.hour} ({peakHour.count} ca)</Text>
+                      </div>
+                    )}
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    💡 Rê chuột vào từng cột để xem chi tiết ca
+                  </Text>
+                </div>
+
+                {/* Vùng vẽ biểu đồ cột tương tác theo giờ */}
+                <div
+                  style={{
+                    position: 'relative',
+                    height: 200,
+                    borderBottom: '2px solid #e2e8f0',
+                    paddingTop: 10,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                  }}
+                >
+                  {hourlyData.map((h, idx) => {
+                    const val =
+                      hourlyMetric === 'in_progress'
+                        ? h.in_progress
+                        : hourlyMetric === 'completed'
+                        ? h.completed
+                        : h.count
+                    const pct = Math.round((val / maxHourlyVal) * 100)
+                    const isPeak = peakHour && peakHour.hour === h.hour && val > 0
+                    const isHovered = hoveredHour === h.hour
+
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          flex: 1,
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'flex-end',
+                          alignItems: 'center',
+                          position: 'relative',
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={() => setHoveredHour(h.hour)}
+                        onMouseLeave={() => setHoveredHour(null)}
+                      >
+                        {/* Tooltip khi hover */}
+                        {isHovered && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: `${Math.max(pct, 15) + 12}%`,
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              backgroundColor: '#1e293b',
+                              color: '#fff',
+                              padding: '6px 10px',
+                              borderRadius: 6,
+                              fontSize: 11,
+                              whiteSpace: 'nowrap',
+                              zIndex: 10,
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, marginBottom: 2 }}>{h.hour}</div>
+                            <div>Tổng ca hẹn: <strong>{h.count}</strong> ca</div>
+                            <div style={{ color: '#86efac' }}>• Hoàn tất: {h.completed}</div>
+                            <div style={{ color: '#fed7aa' }}>• Đang làm: {h.in_progress}</div>
+                            <div style={{ color: '#93c5fd' }}>• Sắp đến: {h.confirmed + h.pending}</div>
+                          </div>
+                        )}
+
+                        {/* Nhãn số liệu trên đầu cột */}
+                        {val > 0 && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: isPeak ? '#d97706' : '#0f8b8d',
+                              marginBottom: 4,
+                            }}
+                          >
+                            {val}
+                          </span>
+                        )}
+
+                        {/* Cột hiển thị */}
+                        <div
+                          style={{
+                            width: '70%',
+                            maxWidth: 32,
+                            height: val > 0 ? `${Math.max(pct, 8)}%` : '4px',
+                            backgroundColor:
+                              val === 0
+                                ? '#f1f5f9'
+                                : isHovered
+                                ? '#0d9488'
+                                : isPeak
+                                ? '#f59e0b'
+                                : '#0f8b8d',
+                            borderRadius: '6px 6px 0 0',
+                            transition: 'all 0.25s ease',
+                            boxShadow: isHovered ? '0 2px 8px rgba(15,139,141,0.4)' : 'none',
+                          }}
+                        />
+
+                        {/* Nhãn giờ trục X */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: -24,
+                            fontSize: 11,
+                            color: isPeak ? '#d97706' : '#64748b',
+                            fontWeight: isPeak ? 700 : 500,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {h.hour.slice(0, 5)}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div style={{ height: 28 }} />
+
+                {/* Chú giải trạng thái cột */}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 10, flexWrap: 'wrap' }}>
+                  <Space size={6} align="center">
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#0f8b8d' }} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>Ca hẹn tiêu chuẩn</Text>
+                  </Space>
+                  <Space size={6} align="center">
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b' }} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>Khung giờ cao điểm</Text>
+                  </Space>
+                  <Space size={6} align="center">
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: '#f1f5f9' }} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>Không có lịch</Text>
+                  </Space>
+                </div>
+              </Card>
+            </Col>
+
+            {/* BIỂU ĐỒ 2: CƠ CẤU TRẠNG THÁI CA & KÊNH TIẾP NHẬN (DONUT CHART & CHANNEL RATIO) */}
+            <Col xs={24} lg={9}>
+              <Card
+                title={
+                  <Space align="center">
+                    <PieChartOutlined style={{ color: '#0f8b8d', fontSize: 18 }} />
+                    <span style={{ fontWeight: 700 }}>Cơ Cấu Trạng Thái & Tiếp Nhận</span>
+                  </Space>
+                }
+                bordered={false}
+                style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', height: '100%' }}
+                styles={{ body: { padding: '16px 20px' } }}
+              >
+                {/* SVG Donut Chart */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <div style={{ position: 'relative', width: 160, height: 160 }}>
+                    <svg width="160" height="160" viewBox="0 0 160 160">
+                      {/* Vòng nền mờ */}
+                      <circle
+                        cx="80"
+                        cy="80"
+                        r={donutRadius}
+                        fill="transparent"
+                        stroke="#f1f5f9"
+                        strokeWidth="16"
+                      />
+                      {/* Các cung tròn trạng thái */}
+                      {statusBreakdown.map((item, idx) => {
+                        const total = dashboardData.total_bookings || 1
+                        const sliceLength = (item.count / total) * donutCircumference
+                        const offset = cumulativeOffset
+                        cumulativeOffset += sliceLength
+
+                        if (item.count === 0) return null
+
+                        return (
+                          <circle
+                            key={idx}
+                            cx="80"
+                            cy="80"
+                            r={donutRadius}
+                            fill="transparent"
+                            stroke={item.color}
+                            strokeWidth="16"
+                            strokeDasharray={`${sliceLength} ${donutCircumference - sliceLength}`}
+                            strokeDashoffset={-offset}
+                            transform="rotate(-90 80 80)"
+                            style={{ transition: 'stroke-dasharray 0.3s ease' }}
+                          />
+                        )
+                      })}
+                    </svg>
+
+                    {/* Số liệu trọng tâm Donut */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      <div style={{ fontSize: 24, fontWeight: 800, color: '#0f8b8d', lineHeight: 1 }}>
+                        {dashboardData.total_bookings}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>lịch hẹn ngày</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Danh sách nhãn trạng thái */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px 12px', marginBottom: 16 }}>
+                  {statusBreakdown.map((item, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                      <Space size={6} align="center">
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: item.color }} />
+                        <span style={{ color: '#475569' }}>{item.label}:</span>
+                      </Space>
+                      <Text strong style={{ color: item.color }}>
+                        {item.count} <span style={{ fontSize: 11, fontWeight: 400, color: '#94a3b8' }}>({item.percent}%)</span>
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+
+                <Divider style={{ margin: '10px 0' }} />
+
+                {/* Kênh tiếp nhận: Online vs Quầy */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12 }}>
+                    <Text type="secondary">Kênh tiếp nhận:</Text>
+                    <Space size={12}>
+                      <span style={{ color: '#7c3aed', fontWeight: 600 }}>
+                        Online: {dashboardData.channel_distribution?.online || 0}
+                      </span>
+                      <span style={{ color: '#06b6d4', fontWeight: 600 }}>
+                        Tại quầy: {dashboardData.channel_distribution?.counter || 0}
+                      </span>
+                    </Space>
+                  </div>
+                  <Progress
+                    percent={
+                      dashboardData.total_bookings > 0
+                        ? Math.round(((dashboardData.channel_distribution?.online || 0) / dashboardData.total_bookings) * 100)
+                        : 0
+                    }
+                    success={{
+                      percent:
+                        dashboardData.total_bookings > 0
+                          ? Math.round(((dashboardData.channel_distribution?.counter || 0) / dashboardData.total_bookings) * 100)
+                          : 0,
+                      strokeColor: '#06b6d4',
+                    }}
+                    strokeColor="#7c3aed"
+                    showInfo={false}
+                    size="small"
+                  />
+                </div>
+              </Card>
+            </Col>
+          </Row>
+
+          {/* ===== 4. KHU VỰC NHÂN SỰ & TÀI NGUYÊN ĐẦU NGÀY ===== */}
+          <Row gutter={[16, 16]} style={{ marginTop: 20 }}>
+            {/* Kỹ thuật viên & Ca trực hôm nay */}
+            <Col xs={24} lg={15}>
+              <Card
+                title={
+                  <Space align="center">
+                    <TeamOutlined style={{ color: '#0f8b8d', fontSize: 18 }} />
+                    <span style={{ fontWeight: 700 }}>Kỹ Thuật Viên & Phân Bổ Ca Trực Ngày</span>
+                  </Space>
+                }
+                extra={
+                  <Button type="link" onClick={() => nav('/app/nhan-su')}>
+                    Quản lý nhân sự →
+                  </Button>
+                }
+                bordered={false}
+                style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', height: '100%' }}
+                styles={{ body: { padding: '16px 20px' } }}
+              >
+                {dashboardData.staff_on_duty?.length > 0 ? (
+                  <List
+                    dataSource={dashboardData.staff_on_duty.filter((s) => s.role === 'technician')}
+                    renderItem={(st) => (
+                      <List.Item style={{ padding: '10px 0' }}>
+                        <div style={{ width: '100%' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                            <Space align="center" size={10}>
+                              <Avatar size="small" style={{ backgroundColor: st.on_leave ? '#ef4444' : '#0f8b8d' }}>
+                                {st.name?.slice(0, 1) || 'K'}
+                              </Avatar>
+                              <div>
+                                <Text strong style={{ fontSize: 14 }}>{st.name}</Text>
+                                <div>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    Ca: {st.shifts}
+                                  </Text>
+                                </div>
+                              </div>
+                            </Space>
+
+                            <Space wrap>
+                              {st.on_leave ? (
+                                <Tag color="error">Nghỉ phép</Tag>
+                              ) : st.in_progress_count > 0 ? (
+                                <Tag color="orange">Đang phục vụ {st.in_progress_count} bé</Tag>
+                              ) : st.has_shift ? (
+                                <Tag color="green">Sẵn sàng nhận bé</Tag>
+                              ) : (
+                                <Tag color="default">Không có ca</Tag>
+                              )}
+                              <Tag color="cyan" style={{ fontWeight: 600 }}>{st.assigned_count} lịch hẹn</Tag>
+                            </Space>
+                          </div>
+
+                          <Progress
+                            percent={Math.min(100, Math.round((st.assigned_count / Math.max(1, dashboardData.total_bookings)) * 100))}
+                            strokeColor="#0f8b8d"
+                            size="small"
+                          />
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                ) : (
+                  <Empty description="Chưa có dữ liệu ca trực cho ngày này." />
+                )}
+              </Card>
+            </Col>
+
+            {/* Công suất tài nguyên cơ sở */}
+            <Col xs={24} lg={9}>
+              <Card
+                title={
+                  <Space align="center">
+                    <ShopOutlined style={{ color: '#0f8b8d', fontSize: 18 }} />
+                    <span style={{ fontWeight: 700 }}>Tài Nguyên & Công Suất Thiết Bị</span>
+                  </Space>
+                }
+                extra={
+                  <Button type="link" onClick={() => nav('/app/bang-le-tan')}>
+                    Sơ đồ vị trí →
+                  </Button>
+                }
+                bordered={false}
+                style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', height: '100%' }}
+                styles={{ body: { padding: '16px 20px' } }}
+              >
+                <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+                  <Descriptions.Item label="Tổng số vị trí phục vụ">
+                    <Text strong style={{ color: '#0f8b8d', fontSize: 15 }}>
+                      {dashboardData.resources_summary?.total || 0} vị trí
+                    </Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="🛁 Bồn tắm spa">
+                    {dashboardData.resources_summary?.by_type?.bath_tub || 0} bồn tắm
+                  </Descriptions.Item>
+                  <Descriptions.Item label="✂️ Bàn cắt tỉa Grooming">
+                    {dashboardData.resources_summary?.by_type?.grooming_table || 0} bàn kéo
+                  </Descriptions.Item>
+                  <Descriptions.Item label="💨 Chuồng sấy chuyên dụng">
+                    {dashboardData.resources_summary?.by_type?.drying_cage || 0} buồng sấy
+                  </Descriptions.Item>
+                  <Descriptions.Item label="🐱 Phòng Spa mèo riêng biệt">
+                    {dashboardData.resources_summary?.by_type?.spa_room || 0} phòng cách âm
+                  </Descriptions.Item>
+                </Descriptions>
+
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Lưu ý vận hành an toàn sinh học"
+                  description="Khử trùng buồng sấy và bề mặt bàn kéo sau mỗi ca phục vụ để ngăn lây nhiễm chéo."
+                  style={{ borderRadius: 10, fontSize: 12 }}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          {/* ===== 5. BẢNG ĐIỀU PHỐI: FEED LỊCH HẸN TRONG NGÀY (FULL WIDTH ĐỒNG BỘ UI) ===== */}
           <Card
             title={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
@@ -1231,29 +1831,31 @@ export default function Home() {
                   <Badge count={dashboardData.total_bookings} style={{ backgroundColor: '#0f8b8d' }} />
                 </Space>
 
-                <Space wrap>
+                <Space wrap align="center">
                   <Input
                     placeholder="Tìm tên bé, chủ, số điện thoại..."
                     prefix={<SearchOutlined style={{ color: '#aaa' }} />}
                     value={searchKeyword}
                     onChange={(e) => setSearchKeyword(e.target.value)}
                     allowClear
-                    style={{ width: 250 }}
+                    style={{ width: 240 }}
                   />
+                  <RowPerPageSelect value={pageSize} onChange={setPageSize} />
                   <Button
                     type="default"
                     icon={<ShopOutlined />}
                     onClick={() => nav('/app/nhan-su?tab=roster')}
                   >
-                    Xem ma trận ca trực
+                    Ma trận ca trực
                   </Button>
                 </Space>
               </div>
             }
-            style={{ borderRadius: 16, marginBottom: 24, boxShadow: '0 4px 16px rgba(0,0,0,0.04)' }}
-            bodyStyle={{ padding: '16px 20px' }}
+            bordered={false}
+            style={{ borderRadius: 14, marginTop: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}
+            styles={{ body: { padding: '16px 20px' } }}
           >
-            {/* Thanh Tab phân loại nhanh */}
+            {/* Thanh Tab phân loại trạng thái */}
             <Tabs
               activeKey={feedTab}
               onChange={setFeedTab}
@@ -1327,7 +1929,10 @@ export default function Home() {
               columns={feedColumns}
               dataSource={filteredFeed}
               rowKey="id"
-              pagination={{ pageSize: 8, showTotal: (t) => `Tổng ${t} lịch hẹn` }}
+              pagination={{
+                pageSize,
+                showTotal: (total, range) => `${range[0]}-${range[1]} trên tổng số ${total} lịch hẹn`,
+              }}
               onRow={(record) => ({
                 onClick: () => {
                   setDetailBooking(record)
@@ -1338,116 +1943,6 @@ export default function Home() {
               locale={{ emptyText: <Empty description="Không có lịch hẹn nào trong danh mục này." /> }}
             />
           </Card>
-
-          {/* ===== KHU VỰC NHÂN SỰ & TÀI NGUYÊN ĐẦU NGÀY ===== */}
-          <Row gutter={[16, 16]}>
-            {/* Nhân sự & Ca trực hôm nay */}
-            <Col xs={24} lg={14}>
-              <Card
-                title={
-                  <Space>
-                    <TeamOutlined style={{ color: '#0f8b8d' }} />
-                    <Text strong>Kỹ thuật viên & Ca trực hôm nay</Text>
-                  </Space>
-                }
-                extra={
-                  <Button type="link" onClick={() => nav('/app/nhan-su')}>
-                    Chi tiết nhân sự →
-                  </Button>
-                }
-                style={{ borderRadius: 16, height: '100%' }}
-              >
-                {dashboardData.staff_on_duty?.length > 0 ? (
-                  <List
-                    dataSource={dashboardData.staff_on_duty.filter((s) => s.role === 'technician')}
-                    renderItem={(st) => (
-                      <List.Item>
-                        <div style={{ width: '100%' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                            <Space>
-                              <Avatar style={{ backgroundColor: st.on_leave ? '#ff4d4f' : '#0f8b8d' }}>
-                                {st.name?.slice(0, 1) || 'K'}
-                              </Avatar>
-                              <div>
-                                <Text strong style={{ fontSize: 14 }}>{st.name}</Text>
-                                <div>
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    Ca: {st.shifts}
-                                  </Text>
-                                </div>
-                              </div>
-                            </Space>
-
-                            <Space>
-                              {st.on_leave ? (
-                                <Tag color="error">Nghỉ phép</Tag>
-                              ) : st.in_progress_count > 0 ? (
-                                <Tag color="orange">Đang phục vụ {st.in_progress_count} bé</Tag>
-                              ) : st.has_shift ? (
-                                <Tag color="green">Sẵn sàng</Tag>
-                              ) : (
-                                <Tag color="default">Không có ca</Tag>
-                              )}
-                              <Tag color="cyan">{st.assigned_count} lịch hẹn</Tag>
-                            </Space>
-                          </div>
-
-                          <Progress
-                            percent={Math.min(100, Math.round((st.assigned_count / Math.max(1, dashboardData.total_bookings)) * 100))}
-                            strokeColor="#0f8b8d"
-                            size="small"
-                          />
-                        </div>
-                      </List.Item>
-                    )}
-                  />
-                ) : (
-                  <Empty description="Chưa có dữ liệu ca trực cho ngày này." />
-                )}
-              </Card>
-            </Col>
-
-            {/* Công suất tài nguyên cơ sở */}
-            <Col xs={24} lg={10}>
-              <Card
-                title={
-                  <Space>
-                    <ShopOutlined style={{ color: '#0f8b8d' }} />
-                    <Text strong>Tài nguyên & Cơ sở vật chất</Text>
-                  </Space>
-                }
-                style={{ borderRadius: 16, height: '100%' }}
-              >
-                <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
-                  <Descriptions.Item label="Tổng tài nguyên phục vụ">
-                    <Text strong style={{ color: '#0f8b8d', fontSize: 16 }}>
-                      {dashboardData.resources_summary?.total || 0} vị trí
-                    </Text>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Bồn tắm spa">
-                    {dashboardData.resources_summary?.by_type?.bath_tub || 0} bồn
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Bàn cắt tỉa">
-                    {dashboardData.resources_summary?.by_type?.grooming_table || 0} bàn
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Chuồng sấy chuyên dụng">
-                    {dashboardData.resources_summary?.by_type?.drying_cage || 0} chuồng
-                  </Descriptions.Item>
-                  <Descriptions.Item label="Phòng spa riêng">
-                    {dashboardData.resources_summary?.by_type?.spa_room || 0} phòng
-                  </Descriptions.Item>
-                </Descriptions>
-
-                <Alert
-                  type="info"
-                  showIcon
-                  message="Lưu ý điều phối đầu ngày"
-                  description="Kiểm tra khử trùng bồn tắm và bàn kéo trước mỗi ca phục vụ để đảm bảo tiêu chuẩn an toàn sinh học."
-                  style={{ borderRadius: 10 }}
-                />
-              </Card>
-            </Col>
-          </Row>
         </div>
       )}
 
@@ -1463,7 +1958,8 @@ export default function Home() {
                 <Text strong>Lịch chăm sóc được phân công cho bạn hôm nay</Text>
               </Space>
             }
-            style={{ borderRadius: 16, marginBottom: 20 }}
+            bordered={false}
+            style={{ borderRadius: 14, marginBottom: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}
           >
             {myTechBookings.length > 0 ? (
               <Table
@@ -1496,7 +1992,7 @@ export default function Home() {
       {/* ========================================================================= */}
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={10}>
-          <Card title="Thông tin cơ sở & Giờ mở cửa" style={{ borderRadius: 16 }}>
+          <Card title="Thông tin cơ sở & Giờ mở cửa" bordered={false} style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}>
             {spa.logo && <Image src={spa.logo} width={96} style={{ marginBottom: 12, borderRadius: 8 }} />}
             <Descriptions column={1} size="small">
               <Descriptions.Item label="Điện thoại">{spa.phone || '02838229999'}</Descriptions.Item>
@@ -1515,7 +2011,8 @@ export default function Home() {
           <Card
             title="Gói chăm sóc nổi bật"
             extra={<Button type="link" onClick={() => nav('/app/dich-vu')}>Xem tất cả dịch vụ →</Button>}
-            style={{ borderRadius: 16 }}
+            bordered={false}
+            style={{ borderRadius: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.03)' }}
           >
             {packages.length === 0 ? (
               <Empty description="Chưa có gói nào." />

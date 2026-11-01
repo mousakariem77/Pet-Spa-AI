@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <!-- Nền tròn màu Teal đồng bộ Pet Spa AI -->
+  <circle cx="50" cy="50" r="50" fill="#0f8b8d"/>
+  
+  <g fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Tai trái cụp đáng yêu -->
+    <path d="M 30 36 C 20 42 18 56 26 62 C 30 65 34 60 33 50"/>
+    <!-- Tai phải cụp đáng yêu -->
+    <path d="M 70 36 C 80 42 82 56 74 62 C 70 65 66 60 67 50"/>
+    
+    <!-- Đầu cún -->
+    <path d="M 31 42 C 32 29 40 25 50 25 C 60 25 68 29 69 42 C 72 54 70 70 63 74 C 56 78 44 78 37 74 C 30 70 28 54 31 42 Z"/>
+    
+    <!-- Mũi cún bo tròn -->
+    <path d="M 45 56 C 45 53 55 53 55 56 C 55 60 45 60 45 56 Z" fill="#ffffff" stroke="none"/>
+    
+    <!-- Miệng cún chữ W -->
+    <path d="M 50 59 L 50 63"/>
+    <path d="M 43 63 C 44 67 49 67 50 63 C 51 67 56 67 57 63"/>
+  </g>
+  
+  <!-- Đôi mắt cún sáng long lanh -->
+  <circle cx="41.5" cy="46" r="3.5" fill="#ffffff"/>
+  <circle cx="58.5" cy="46" r="3.5" fill="#ffffff"/>
+  <circle cx="42.5" cy="45" r="1.2" fill="#0f8b8d"/>
+  <circle cx="59.5" cy="45" r="1.2" fill="#0f8b8d"/>
+</svg>

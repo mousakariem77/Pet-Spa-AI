@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert, Avatar, Badge, Button, Card, Checkbox, Col, DatePicker, Divider, Dropdown, Empty, Form, Input, Modal, Popconfirm, Radio, Row,
-  Select, Space, Switch, Table, Tabs, Tag, TimePicker, Tooltip, Typography, message,
+  Segmented, Select, Space, Switch, Table, Tabs, Tag, TimePicker, Tooltip, Typography, message,
 } from 'antd'
 import {
   CalendarOutlined, CheckCircleOutlined, ClockCircleOutlined, DeleteOutlined, EditOutlined, EnvironmentOutlined, ExclamationCircleOutlined,
+  EyeInvisibleOutlined,
   EyeOutlined, IdcardOutlined, InfoCircleOutlined, LeftOutlined, LockOutlined, MailOutlined, MoreOutlined, PhoneOutlined, PlusOutlined, ReloadOutlined,
   RightOutlined, SafetyCertificateOutlined, ScheduleOutlined, SearchOutlined, StarOutlined, TagOutlined, TeamOutlined, ThunderboltOutlined,
   ToolOutlined, UserAddOutlined, UserOutlined,
@@ -143,6 +145,7 @@ const ROLE_COLOR_OPTIONS = [
 ]
 
 export default function StaffManagement() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const isManager = user?.role === 'manager'
 
@@ -214,6 +217,11 @@ export default function StaffManagement() {
   const [specPageSize, setSpecPageSize] = useState(10)
   const [specSearch, setSpecSearch] = useState('')
   const [specSpeciesFilter, setSpecSpeciesFilter] = useState('all')
+  const [specStatusFilter, setSpecStatusFilter] = useState('all') // 'all' | 'active' | 'inactive'
+
+  // Modal xác nhận xóa dùng chung (Staff, Resource, Specialty)
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState(null) // { target, type: 'staff' | 'resource' | 'specialty' }
+  const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false)
   const [specDetailModalOpen, setSpecDetailModalOpen] = useState(false)
   const [viewingSpec, setViewingSpec] = useState(null)
 
@@ -576,16 +584,36 @@ export default function StaffManagement() {
     try {
       const [stf, specs] = await Promise.all([
         api('/staff?include_inactive=1'),
-        api('/specialties'),
+        api('/specialties?include_inactive=1'),
       ])
-      setStaffList(unwrap(stf))
+      const sList = unwrap(stf)
+      setStaffList(sList)
       setSpecialties(unwrap(specs))
+      return sList
     } catch (e) {
       message.error(e.message || 'Không thể tải danh sách nhân viên')
+      return []
     } finally {
       setStaffLoading(false)
     }
   }, [])
+
+  // Tự động nhận diện query param staff_id khi chuyển từ trang Lịch hẹn sang
+  useEffect(() => {
+    const staffIdParam = searchParams.get('staff_id') || searchParams.get('id')
+    if (staffIdParam) {
+      setActiveTab('staff')
+      loadStaff().then((list) => {
+        const targetId = Number(staffIdParam)
+        const found = (list || []).find((s) => s.id === targetId || s.user_id === targetId)
+        if (found) {
+          setViewingStaff(found)
+          setStaffDetailModalOpen(true)
+        }
+      })
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, loadStaff])
 
   const loadResources = useCallback(async () => {
     setResLoading(true)
@@ -616,6 +644,26 @@ export default function StaffManagement() {
     setStaffRoleMap(newMap)
     localStorage.setItem('petspa_staff_role_map', JSON.stringify(newMap))
   }
+
+  // Đếm số lượng theo trạng thái
+  const staffCounts = useMemo(() => ({
+    all: staffList.length,
+    active: staffList.filter((s) => s.is_active).length,
+    hidden: staffList.filter((s) => !s.is_active).length,
+  }), [staffList])
+
+  const specCounts = useMemo(() => ({
+    all: specialties.length,
+    active: specialties.filter((s) => s.is_active !== false).length,
+    hidden: specialties.filter((s) => s.is_active === false).length,
+  }), [specialties])
+
+  const resCounts = useMemo(() => ({
+    all: resources.length,
+    active: resources.filter((r) => r.is_active).length,
+    hidden: resources.filter((r) => !r.is_active).length,
+  }), [resources])
+
 
   // Lọc dữ liệu Nhân sự
   const filteredStaffList = useMemo(() => {
@@ -685,9 +733,12 @@ export default function StaffManagement() {
         specSpeciesFilter === 'all' ||
         s.species_scope === specSpeciesFilter ||
         (specSpeciesFilter !== 'both' && s.species_scope === 'both')
-      return matchSearch && matchSpecies
+      const matchStatus =
+        specStatusFilter === 'all' ||
+        (specStatusFilter === 'active' ? s.is_active !== false : s.is_active === false)
+      return matchSearch && matchSpecies && matchStatus
     })
-  }, [specialties, specSearch, specSpeciesFilter])
+  }, [specialties, specSearch, specSpeciesFilter, specStatusFilter])
 
   // Lọc danh sách Tài nguyên
   const filteredResources = useMemo(() => {
@@ -837,13 +888,16 @@ export default function StaffManagement() {
 
     const doToggle = async () => {
       try {
-        if (st.is_active) {
-          await api(`/staff/${st.id}`, { method: 'DELETE' })
-        } else {
-          await api(`/staff/${st.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: true }) })
-        }
-        message.success(`Đã ${st.is_active ? 'khóa' : 'kích hoạt'} tài khoản nhân viên ${st.full_name || st.username}`)
+        const nextActive = !st.is_active
+        await api(`/staff/${st.id}`, {
+          method: 'PATCH',
+          body: { is_active: nextActive },
+        })
+        message.success(`Đã ${nextActive ? 'kích hoạt lại' : 'khóa'} tài khoản nhân viên ${st.full_name || st.username}`)
         loadStaff()
+        if (viewingStaff?.id === st.id) {
+          setViewingStaff({ ...viewingStaff, is_active: nextActive })
+        }
       } catch (e) {
         message.error(e.message || 'Thao tác không thành công')
       }
@@ -852,8 +906,8 @@ export default function StaffManagement() {
     if (st.is_active) {
       Modal.confirm({
         title: `Khóa tài khoản ${st.full_name || st.username}?`,
-        icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-        content: 'Nhân viên này sẽ không thể đăng nhập vào hệ thống spa nữa.',
+        icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+        content: 'Nhân viên này sẽ bị chuyển vào mục Đã khóa/ẩn và không thể đăng nhập vào hệ thống spa nữa.',
         okText: 'Khóa tài khoản',
         okType: 'danger',
         cancelText: 'Hủy',
@@ -862,6 +916,70 @@ export default function StaffManagement() {
       })
     } else {
       doToggle()
+    }
+  }
+
+  // Ẩn / Hiện chuyên môn
+  const toggleSpecialtyActive = async (spec) => {
+    try {
+      const nextActive = spec.is_active === false
+      await api(`/specialties/${spec.id}`, {
+        method: 'PATCH',
+        body: { is_active: nextActive },
+      })
+      message.success(`Đã ${nextActive ? 'hiển thị lại' : 'ẩn'} chuyên môn "${spec.name_vi}"`)
+      loadStaff()
+      if (viewingSpec?.id === spec.id) {
+        setViewingSpec({ ...viewingSpec, is_active: nextActive })
+      }
+    } catch (e) {
+      message.error(e.message || 'Lỗi khi cập nhật chuyên môn')
+    }
+  }
+
+  // Xóa an toàn nhân sự / tài nguyên / chuyên môn (chỉ khi đã ẩn mới được xóa)
+  const openDeleteConfirm = (target, type = 'staff') => {
+    if (target.is_active !== false) {
+      const label = type === 'staff' ? 'nhân sự' : type === 'resource' ? 'cơ sở vật chất' : 'chuyên môn'
+      message.warning(`Cần khóa/ẩn ${label} này trước khi có thể xóa vĩnh viễn!`)
+      return
+    }
+    setDeleteConfirmTarget({ target, type })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmTarget) return
+    const { target, type } = deleteConfirmTarget
+    setDeleteConfirmBusy(true)
+    try {
+      let endpoint = ''
+      if (type === 'staff') endpoint = `/staff/${target.id}`
+      else if (type === 'resource') endpoint = `/resources/${target.id}`
+      else if (type === 'specialty') endpoint = `/specialties/${target.id}`
+
+      await api(endpoint, { method: 'DELETE' })
+      const typeLabel =
+        type === 'staff'
+          ? 'tài khoản nhân sự'
+          : type === 'resource'
+          ? 'cơ sở vật chất'
+          : 'chuyên môn tay nghề'
+      message.success(`Đã xóa vĩnh viễn ${typeLabel} thành công!`)
+      setDeleteConfirmTarget(null)
+
+      if (type === 'staff') {
+        if (viewingStaff?.id === target.id) setStaffDetailModalOpen(false)
+        loadStaff()
+      } else if (type === 'resource') {
+        loadResources()
+      } else if (type === 'specialty') {
+        if (viewingSpec?.id === target.id) setSpecDetailModalOpen(false)
+        loadStaff()
+      }
+    } catch (e) {
+      message.error(e.message || 'Không thể xóa vĩnh viễn mục này')
+    } finally {
+      setDeleteConfirmBusy(false)
     }
   }
 
@@ -1400,9 +1518,8 @@ export default function StaffManagement() {
                   ? [
                       {
                         key: 'toggle-active',
-                        label: st.is_active ? 'Khóa tài khoản' : 'Kích hoạt tài khoản',
-                        icon: <LockOutlined />,
-                        danger: st.is_active,
+                        label: st.is_active ? 'Khóa tài khoản' : 'Kích hoạt lại tài khoản',
+                        icon: st.is_active ? <EyeInvisibleOutlined style={{ color: '#d97706' }} /> : <EyeOutlined style={{ color: '#0f8b8d' }} />,
                         onClick: () => toggleStaffActive(st),
                       },
                     ]
@@ -1429,6 +1546,25 @@ export default function StaffManagement() {
             >
               {isManager ? 'Sửa' : 'Xem'}
             </Button>
+            {isManager && !isSelf && (
+              st.is_active ? (
+                <Tooltip title="Cần khóa tài khoản trước khi có thể xóa">
+                  <span>
+                    <Button size="small" danger disabled icon={<DeleteOutlined />} style={{ borderRadius: 6 }} />
+                  </span>
+                </Tooltip>
+              ) : (
+                <Tooltip title="Xóa vĩnh viễn tài khoản nhân sự này">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    style={{ borderRadius: 6 }}
+                    onClick={() => openDeleteConfirm(st, 'staff')}
+                  />
+                </Tooltip>
+              )
+            )}
             <span onClick={(e) => e.stopPropagation()}>
               <Dropdown
                 menu={{ items: moreItems }}
@@ -1560,27 +1696,6 @@ export default function StaffManagement() {
       },
     },
     {
-      title: 'Mô tả phạm vi kỹ năng & công việc',
-      dataIndex: 'description',
-      key: 'description',
-      ellipsis: true,
-      render: (desc) => (
-        <Tooltip title={desc || 'Chưa có mô tả chi tiết'}>
-          <Text
-            ellipsis
-            style={{
-              color: '#475569',
-              fontSize: 13,
-              maxWidth: 380,
-              display: 'inline-block',
-            }}
-          >
-            {desc || <Text type="secondary" italic>Chưa có mô tả chi tiết</Text>}
-          </Text>
-        </Tooltip>
-      ),
-    },
-    {
       title: 'Số nhân sự sở hữu',
       key: 'staff_count',
       width: 160,
@@ -1594,9 +1709,21 @@ export default function StaffManagement() {
       },
     },
     {
+      title: 'Trạng thái',
+      key: 'status',
+      width: 130,
+      render: (_, spec) => (
+        spec.is_active !== false ? (
+          <Tag color="success">🟢 Hoạt động</Tag>
+        ) : (
+          <Tag color="default">⚪ Đã ẩn</Tag>
+        )
+      ),
+    },
+    {
       title: 'Thao tác',
       key: 'act',
-      width: 130,
+      width: 170,
       render: (_, spec) => (
         <Space onClick={(e) => e.stopPropagation()}>
           {isManager ? (
@@ -1611,17 +1738,51 @@ export default function StaffManagement() {
               >
                 Sửa
               </Button>
-              <Tooltip title="Xóa chuyên môn này">
+              {spec.is_active !== false ? (
                 <Button
                   size="small"
-                  danger
-                  icon={<DeleteOutlined />}
+                  icon={<EyeInvisibleOutlined />}
+                  style={{ color: '#d97706', borderColor: '#fcd34d' }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    confirmDeleteSpecialty(spec)
+                    toggleSpecialtyActive(spec)
                   }}
-                />
-              </Tooltip>
+                >
+                  Ẩn
+                </Button>
+              ) : (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<EyeOutlined />}
+                  style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleSpecialtyActive(spec)
+                  }}
+                >
+                  Hiện lại
+                </Button>
+              )}
+              {spec.is_active !== false ? (
+                <Tooltip title="Cần ẩn chuyên môn trước khi có thể xóa">
+                  <span>
+                    <Button size="small" danger disabled icon={<DeleteOutlined />} />
+                  </span>
+                </Tooltip>
+              ) : (
+                <Tooltip title="Xóa vĩnh viễn chuyên môn này">
+                  <Button
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openDeleteConfirm(spec, 'specialty')
+                    }}
+                  />
+                </Tooltip>
+              )}
             </>
           ) : (
             <Button
@@ -1700,17 +1861,25 @@ export default function StaffManagement() {
                 >
                   Sửa
                 </Button>
-                <Tooltip title="Xóa vĩnh viễn cơ sở vật chất">
-                  <Button
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      confirmDeleteResource(r)
-                    }}
-                  />
-                </Tooltip>
+                {r.is_active ? (
+                  <Tooltip title="Cần tạm ngưng cơ sở vật chất trước khi có thể xóa">
+                    <span>
+                      <Button size="small" danger disabled icon={<DeleteOutlined />} />
+                    </span>
+                  </Tooltip>
+                ) : (
+                  <Tooltip title="Xóa vĩnh viễn cơ sở vật chất này">
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openDeleteConfirm(r, 'resource')
+                      }}
+                    />
+                  </Tooltip>
+                )}
               </Space>
             ),
           },
@@ -1822,18 +1991,16 @@ export default function StaffManagement() {
                       ]}
                     />
 
-                    <Select
-                      placeholder="Trạng thái"
+                    <Segmented
                       value={staffStatusFilter}
                       onChange={(val) => {
                         setStaffStatusFilter(val)
                         setStaffPage(1)
                       }}
-                      style={{ width: 160 }}
                       options={[
-                        { value: 'all', label: 'Tất cả trạng thái' },
-                        { value: 'active', label: '🟢 Đang hoạt động' },
-                        { value: 'inactive', label: '🔴 Đã khóa' },
+                        { label: `Tất cả (${staffCounts.all})`, value: 'all' },
+                        { label: `Đang làm việc (${staffCounts.active})`, value: 'active' },
+                        { label: `Đã khóa/ẩn (${staffCounts.hidden})`, value: 'inactive' },
                       ]}
                     />
 
@@ -1859,6 +2026,15 @@ export default function StaffManagement() {
                 </div>
 
                 <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 16, overflow: 'hidden' }}>
+                  {staffStatusFilter === 'inactive' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Danh sách tài khoản nhân sự đang bị khóa / ẩn"
+                      description="Nhân viên bị khóa không thể đăng nhập vào hệ thống. Bạn có thể kích hoạt lại tài khoản bất kỳ lúc nào hoặc xóa vĩnh viễn nếu không có lịch sử phân ca/lịch hẹn liên quan."
+                    />
+                  )}
                   <Table
                     dataSource={filteredStaffList}
                     columns={staffColumns}
@@ -2137,6 +2313,19 @@ export default function StaffManagement() {
                         { value: 'cat', label: '🐱 Chỉ cho Mèo' },
                       ]}
                     />
+
+                    <Segmented
+                      value={specStatusFilter}
+                      onChange={(val) => {
+                        setSpecStatusFilter(val)
+                        setSpecPage(1)
+                      }}
+                      options={[
+                        { label: `Tất cả (${specCounts.all})`, value: 'all' },
+                        { label: `Đang hoạt động (${specCounts.active})`, value: 'active' },
+                        { label: `Đã ẩn (${specCounts.hidden})`, value: 'inactive' },
+                      ]}
+                    />
                   </Space>
 
                   <Space size={12}>
@@ -2145,6 +2334,15 @@ export default function StaffManagement() {
                 </div>
 
                 <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 16, overflow: 'hidden' }}>
+                  {specStatusFilter === 'inactive' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Danh sách chuyên môn tay nghề đang tạm ẩn"
+                      description="Các chuyên môn này không xuất hiện khi gán kỹ năng mới cho nhân viên. Bạn có thể bấm 'Hiện lại' để khôi phục hoặc xóa vĩnh viễn khi không còn dịch vụ liên quan."
+                    />
+                  )}
                   <Table
                     dataSource={filteredSpecialties}
                     columns={specialtyColumns}
@@ -2234,18 +2432,16 @@ export default function StaffManagement() {
                       ]}
                     />
 
-                    <Select
-                      placeholder="Trạng thái"
+                    <Segmented
                       value={resStatusFilter}
                       onChange={(val) => {
                         setResStatusFilter(val)
                         setResPage(1)
                       }}
-                      style={{ width: 160 }}
                       options={[
-                        { value: 'all', label: 'Tất cả trạng thái' },
-                        { value: 'active', label: '🟢 Sẵn sàng' },
-                        { value: 'inactive', label: '⚪ Tạm ngưng' },
+                        { label: `Tất cả (${resCounts.all})`, value: 'all' },
+                        { label: `Sẵn sàng (${resCounts.active})`, value: 'active' },
+                        { label: `Tạm ngưng (${resCounts.hidden})`, value: 'inactive' },
                       ]}
                     />
                   </Space>
@@ -2256,6 +2452,15 @@ export default function StaffManagement() {
                 </div>
 
                 <Card bodyStyle={{ padding: 0 }} style={{ borderRadius: 16, overflow: 'hidden' }}>
+                  {resStatusFilter === 'inactive' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Danh sách cơ sở vật chất đang tạm ngưng / ẩn"
+                      description="Các cơ sở này không tham gia phân bổ lịch hẹn tự động. Bạn có thể bật công tắc để kích hoạt lại, hoặc xóa vĩnh viễn nếu không còn lịch hẹn liên quan."
+                    />
+                  )}
                   <Table
                     dataSource={filteredResources}
                     columns={resColumns}
@@ -2573,6 +2778,46 @@ export default function StaffManagement() {
             >
               Chỉnh sửa
             </Button>
+          ),
+          isManager && viewingStaff && (viewingStaff.user_id !== user?.id && viewingStaff.username !== user?.username) && (
+            viewingStaff.is_active ? (
+              <Button
+                key="lock"
+                icon={<EyeInvisibleOutlined />}
+                style={{ color: '#d97706', borderColor: '#fcd34d' }}
+                onClick={() => toggleStaffActive(viewingStaff)}
+              >
+                Khóa tài khoản
+              </Button>
+            ) : (
+              <Button
+                key="unlock"
+                type="primary"
+                icon={<EyeOutlined />}
+                style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                onClick={() => toggleStaffActive(viewingStaff)}
+              >
+                Kích hoạt lại
+              </Button>
+            )
+          ),
+          isManager && viewingStaff && (viewingStaff.user_id !== user?.id && viewingStaff.username !== user?.username) && (
+            viewingStaff.is_active ? (
+              <Tooltip key="del-tip" title="Cần khóa tài khoản trước khi có thể xóa">
+                <span>
+                  <Button danger disabled icon={<DeleteOutlined />}>Xóa</Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button
+                key="del"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => openDeleteConfirm(viewingStaff, 'staff')}
+              >
+                Xóa vĩnh viễn
+              </Button>
+            )
           ),
         ]}
         width={580}
@@ -3012,7 +3257,6 @@ export default function StaffManagement() {
           isManager && (
             <Button
               key="edit"
-              type="primary"
               icon={<EditOutlined />}
               onClick={() => {
                 const target = viewingSpec
@@ -3020,8 +3264,48 @@ export default function StaffManagement() {
                 openSpecModal(target)
               }}
             >
-              Chỉnh sửa chuyên môn
+              Chỉnh sửa
             </Button>
+          ),
+          isManager && viewingSpec && (
+            viewingSpec.is_active !== false ? (
+              <Button
+                key="hide"
+                icon={<EyeInvisibleOutlined />}
+                style={{ color: '#d97706', borderColor: '#fcd34d' }}
+                onClick={() => toggleSpecialtyActive(viewingSpec)}
+              >
+                Ẩn chuyên môn
+              </Button>
+            ) : (
+              <Button
+                key="unhide"
+                type="primary"
+                icon={<EyeOutlined />}
+                style={{ background: '#0f8b8d', borderColor: '#0f8b8d' }}
+                onClick={() => toggleSpecialtyActive(viewingSpec)}
+              >
+                Hiện lại
+              </Button>
+            )
+          ),
+          isManager && viewingSpec && (
+            viewingSpec.is_active !== false ? (
+              <Tooltip key="del-tip" title="Cần ẩn chuyên môn trước khi có thể xóa">
+                <span>
+                  <Button danger disabled icon={<DeleteOutlined />}>Xóa</Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button
+                key="del"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => openDeleteConfirm(viewingSpec, 'specialty')}
+              >
+                Xóa vĩnh viễn
+              </Button>
+            )
           ),
         ]}
         width={580}
@@ -3705,6 +3989,51 @@ export default function StaffManagement() {
             )}
           </div>
         </div>
+      </Modal>
+
+      {/* ===== MODAL XÁC NHẬN XÓA (STAFF / RESOURCE / SPECIALTY) ===== */}
+      <Modal
+        open={!!deleteConfirmTarget}
+        onCancel={() => !deleteConfirmBusy && setDeleteConfirmTarget(null)}
+        onOk={handleConfirmDelete}
+        confirmLoading={deleteConfirmBusy}
+        okText="Xác nhận xóa vĩnh viễn"
+        cancelText="Hủy bỏ"
+        okButtonProps={{ danger: true }}
+        centered
+        title={
+          <Space style={{ color: '#ff4d4f' }}>
+            <ExclamationCircleOutlined style={{ fontSize: 20 }} />
+            <span style={{ fontWeight: 600 }}>
+              Xác nhận xóa vĩnh viễn {deleteConfirmTarget?.type === 'staff' ? 'nhân sự' : deleteConfirmTarget?.type === 'resource' ? 'cơ sở vật chất' : 'chuyên môn'}
+            </span>
+          </Space>
+        }
+      >
+        {deleteConfirmTarget && (
+          <div style={{ marginTop: 12 }}>
+            <p style={{ fontSize: 14 }}>
+              Bạn có chắc chắn muốn xóa vĩnh viễn{' '}
+              {deleteConfirmTarget.type === 'staff' ? 'nhân sự' : deleteConfirmTarget.type === 'resource' ? 'cơ sở vật chất' : 'chuyên môn'}{' '}
+              <Text strong style={{ color: '#0f8b8d', fontSize: 15 }}>
+                "{deleteConfirmTarget.target.full_name || deleteConfirmTarget.target.name || deleteConfirmTarget.target.name_vi || deleteConfirmTarget.target.username}"
+              </Text>?
+            </p>
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 12 }}
+              message="Lưu ý thao tác không thể hoàn tác"
+              description={
+                deleteConfirmTarget.type === 'staff'
+                  ? "Hành động này sẽ xóa dữ liệu tài khoản và hồ sơ nhân sự. Nếu nhân sự đã từng có ca làm việc hoặc phụ trách lịch hẹn trong quá khứ, hệ thống sẽ ngăn chặn việc xóa để đảm bảo toàn vẹn dữ liệu. Khi đó bạn nên tiếp tục giữ tài khoản ở trạng thái 'Đã khóa/ẩn'."
+                  : deleteConfirmTarget.type === 'resource'
+                  ? "Hành động này sẽ xóa hoàn toàn cơ sở vật chất khỏi hệ thống. Nếu tài nguyên đang được gán cho các lịch hẹn, hệ thống sẽ ngăn chặn để đảm bảo an toàn."
+                  : "Chuyên môn này sẽ bị gỡ bỏ khỏi danh mục kỹ năng của nhân viên và các dịch vụ liên kết. Nếu có dữ liệu ràng buộc, hệ thống sẽ bảo vệ và yêu cầu tiếp tục giữ ở trạng thái ẩn."
+              }
+            />
+          </div>
+        )}
       </Modal>
     </div>
   )

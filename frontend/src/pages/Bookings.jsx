@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
-  Alert, Badge, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty,
+  Alert, Avatar, Badge, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty,
   Form, Input, Modal, Radio, Row, Segmented, Select, Space, Spin, Table, Tag, Timeline,
   Statistic, Typography, message,
 } from 'antd'
@@ -55,8 +55,13 @@ export default function Bookings() {
   const [viewMode, setViewMode] = useState('table') // 'table' | 'week'
   const [calendarWeekStart, setCalendarWeekStart] = useState(() => weekStartFor(dayjs()))
 
+  const [staffFilter, setStaffFilter] = useState('')
+  const [serviceTypeFilter, setServiceTypeFilter] = useState('')
+
   // Dữ liệu hỗ trợ tạo lịch
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [clients, setClients] = useState([])
+  const [selectedClientId, setSelectedClientId] = useState(null)
   const [myPets, setMyPets] = useState([])
   const [allPets, setAllPets] = useState([])
   const [packages, setPackages] = useState([])
@@ -91,17 +96,55 @@ export default function Bookings() {
 
   const [form] = Form.useForm()
   const weekFocusDate = selectedDate || dayjs()
-  const visibleBookings = statusFilter
-    ? bookings.filter((booking) => booking.status === statusFilter)
-    : bookings
+
+  const bookingCounts = {
+    all: bookings.length,
+    pending: bookings.filter((b) => b.status === 'pending').length,
+    confirmed: bookings.filter((b) => b.status === 'confirmed').length,
+    active: bookings.filter((b) => ['checked_in', 'in_progress'].includes(b.status)).length,
+    completed: bookings.filter((b) => b.status === 'completed').length,
+    cancelled: bookings.filter((b) => b.status === 'cancelled').length,
+  }
+
   const bookingStats = [
-    { key: 'total', label: 'Tổng lịch', value: bookings.length, tone: 'teal' },
-    { key: 'pending', label: 'Chờ duyệt', value: bookings.filter((booking) => booking.status === 'pending').length, tone: 'amber' },
-    { key: 'confirmed', label: 'Đã xác nhận', value: bookings.filter((booking) => booking.status === 'confirmed').length, tone: 'blue' },
-    { key: 'active', label: 'Đang phục vụ', value: bookings.filter((booking) => ['checked_in', 'in_progress'].includes(booking.status)).length, tone: 'cyan' },
-    { key: 'completed', label: 'Hoàn tất', value: bookings.filter((booking) => booking.status === 'completed').length, tone: 'green' },
-    { key: 'cancelled', label: 'Đã hủy', value: bookings.filter((booking) => booking.status === 'cancelled').length, tone: 'slate' },
+    { key: 'total', label: 'Tổng lịch', value: bookingCounts.all, tone: 'teal' },
+    { key: 'pending', label: 'Chờ duyệt', value: bookingCounts.pending, tone: 'amber' },
+    { key: 'confirmed', label: 'Đã xác nhận', value: bookingCounts.confirmed, tone: 'blue' },
+    { key: 'active', label: 'Đang phục vụ', value: bookingCounts.active, tone: 'cyan' },
+    { key: 'completed', label: 'Hoàn tất', value: bookingCounts.completed, tone: 'green' },
+    { key: 'cancelled', label: 'Đã hủy', value: bookingCounts.cancelled, tone: 'slate' },
   ]
+
+  const statusTabOptions = [
+    { label: `Tất cả (${bookingCounts.all})`, value: '' },
+    { label: `Chờ duyệt (${bookingCounts.pending})`, value: 'pending' },
+    { label: `Đã xác nhận (${bookingCounts.confirmed})`, value: 'confirmed' },
+    { label: `Đang phục vụ (${bookingCounts.active})`, value: 'active' },
+    { label: `Hoàn tất (${bookingCounts.completed})`, value: 'completed' },
+    { label: `Đã hủy (${bookingCounts.cancelled})`, value: 'cancelled' },
+  ]
+
+  const filteredBookings = bookings.filter((booking) => {
+    if (statusFilter) {
+      if (statusFilter === 'active') {
+        if (!['checked_in', 'in_progress'].includes(booking.status)) return false
+      } else if (booking.status !== statusFilter) {
+        return false
+      }
+    }
+    if (staffFilter && booking.staff !== staffFilter) {
+      return false
+    }
+    if (serviceTypeFilter === 'package' && !booking.package) {
+      return false
+    }
+    if (serviceTypeFilter === 'services' && booking.package) {
+      return false
+    }
+    return true
+  })
+
+  const visibleBookings = filteredBookings
   const selectedPetId = Form.useWatch('pet', form)
   const selectedEditPetId = Form.useWatch('pet', editForm)
   const availablePets = isCustomer ? myPets : allPets
@@ -109,16 +152,16 @@ export default function Bookings() {
   const selectedEditPet = availablePets.find((pet) => pet.id === selectedEditPetId)
   const packagesForSelectedPet = selectedPet
     ? packages.filter((pkg) => pkg.species_scope === 'both' || pkg.species_scope === selectedPet.species)
-    : []
+    : packages
   const packagesForEditedPet = selectedEditPet
     ? packages.filter((pkg) => pkg.species_scope === 'both' || pkg.species_scope === selectedEditPet.species)
-    : []
+    : packages
   const servicesForSelectedPet = selectedPet
     ? services.filter((service) => service.species_scope === 'both' || service.species_scope === selectedPet.species)
-    : []
+    : services
   const servicesForEditedPet = selectedEditPet
     ? services.filter((service) => service.species_scope === 'both' || service.species_scope === selectedEditPet.species)
-    : []
+    : services
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -228,7 +271,7 @@ export default function Bookings() {
   }, [loadBookings])
 
   const ensureMetaLoaded = async () => {
-    if (packages.length && services.length) {
+    if (packages.length && services.length && (!isFrontDesk || staffList.length)) {
       return { petList: isCustomer ? myPets : allPets, pkgs: packages }
     }
     try {
@@ -249,17 +292,19 @@ export default function Bookings() {
         return technicians
       }
 
-      const [pkgs, svcs, stf, pts] = await Promise.all([
+      const [pkgs, svcs, stf, pts, clts] = await Promise.all([
         api('/packages'),
         api('/services'),
-        isFrontDesk ? loadAllTechnicians() : Promise.resolve([]),
+        !isCustomer ? loadAllTechnicians() : Promise.resolve([]),
         api('/pets'),
+        !isCustomer ? api('/clients?page_size=300') : Promise.resolve([]),
       ])
       const pList = unwrap(pts)
       const pkgList = unwrap(pkgs)
       setPackages(pkgList)
       setServices(unwrap(svcs))
       setStaffList(stf)
+      if (clts) setClients(unwrap(clts))
       if (isCustomer) {
         setMyPets(pList)
       } else {
@@ -271,9 +316,14 @@ export default function Bookings() {
     }
   }
 
+  useEffect(() => {
+    ensureMetaLoaded()
+  }, [])
+
   // Load danh mục khi mở modal tạo lịch
   const openCreateModal = async () => {
     form.resetFields()
+    setSelectedClientId(null)
     setQuoteData(null)
     setCreateModalOpen(true)
     return ensureMetaLoaded()
@@ -363,17 +413,65 @@ export default function Bookings() {
     }
   }
 
+  // Xem chi tiết lịch hẹn
+  const openDetail = async (id) => {
+    try {
+      const res = await api(`/bookings/${id}`)
+      setDetailBooking(res)
+      setDetailOpen(true)
+    } catch (e) {
+      message.error(e.message || 'Không thể xem chi tiết lịch hẹn')
+    }
+  }
+
   // Tự động nhận diện query params khi chuyển từ trang khác sang
   useEffect(() => {
+    const bookingIdParam = searchParams.get('id') || searchParams.get('booking_id')
+    if (bookingIdParam) {
+      openDetail(Number(bookingIdParam))
+      setSearchParams({}, { replace: true })
+      return
+    }
+
     const petParam = searchParams.get('pet')
     const pkgParam = searchParams.get('package')
-    if (petParam) {
-      openCreateModal().then(() => {
-        form.setFieldsValue({
-          pet: Number(petParam),
+    if (petParam || pkgParam) {
+      openCreateModal().then((meta) => {
+        const availablePetList = meta?.petList || (isCustomer ? myPets : allPets) || []
+        const availablePkgs = meta?.pkgs || packages || []
+        const fieldsToSet = {
           booking_type: 'package',
-          package: pkgParam ? Number(pkgParam) : undefined,
-        })
+        }
+        if (pkgParam) {
+          fieldsToSet.package = Number(pkgParam)
+        }
+        if (petParam) {
+          const pId = Number(petParam)
+          const petObj = availablePetList.find((p) => p.id === pId)
+          if (petObj && petObj.client) {
+            setSelectedClientId(petObj.client)
+            form.setFieldValue('client', petObj.client)
+          }
+          fieldsToSet.pet = pId
+          setSelectedPetId(pId)
+        } else if (isCustomer && availablePetList.length > 0) {
+          if (pkgParam) {
+            const chosenPkg = availablePkgs.find((p) => p.id === Number(pkgParam))
+            if (chosenPkg && chosenPkg.species_scope !== 'both') {
+              const matchingPet = availablePetList.find((p) => p.species === chosenPkg.species_scope)
+              const chosenPetId = matchingPet ? matchingPet.id : availablePetList[0].id
+              fieldsToSet.pet = chosenPetId
+              setSelectedPetId(chosenPetId)
+            } else {
+              fieldsToSet.pet = availablePetList[0].id
+              setSelectedPetId(availablePetList[0].id)
+            }
+          } else {
+            fieldsToSet.pet = availablePetList[0].id
+            setSelectedPetId(availablePetList[0].id)
+          }
+        }
+        form.setFieldsValue(fieldsToSet)
       })
       setSearchParams({}, { replace: true })
     }
@@ -475,17 +573,6 @@ export default function Bookings() {
     }
   }
 
-  // Xem chi tiết
-  const openDetail = async (id) => {
-    try {
-      const res = await api(`/bookings/${id}`)
-      setDetailBooking(res)
-      setDetailOpen(true)
-    } catch (e) {
-      message.error(e.message || 'Không thể xem chi tiết')
-    }
-  }
-
   // Thao tác vòng đời lịch hẹn
   const handleAction = async (actionPath, payload = {}) => {
     if (!detailBooking) return
@@ -549,47 +636,45 @@ export default function Bookings() {
       ),
     },
     {
-      title: 'Bé cưng',
-      key: 'pet',
+      title: 'Khách hàng',
+      key: 'client',
       render: (_, b) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <PetAvatar species={b.pet_info?.species} size={36} />
+          <Avatar
+            style={{
+              background: '#0f8b8d',
+              color: '#fff',
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+            icon={<UserOutlined />}
+          />
           <div>
             <a
-              style={{ fontWeight: 700, color: '#0f8b8d', fontSize: 14, cursor: 'pointer' }}
-              onClick={() => nav(`/app/thu-cung?q=${b.pet_info?.name}`)}
-              title="Bấm để xem hồ sơ bé cưng này"
+              style={{ fontWeight: 600, color: '#0b3d3f', fontSize: 14, cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation()
+                nav(`/app/khach-hang?q=${encodeURIComponent(b.client_info?.phone || b.client_info?.full_name || '')}`)
+              }}
+              title="Bấm để xem hồ sơ chủ nuôi"
             >
-              {b.pet_info?.name}
+              {b.client_info?.full_name || (isCustomer ? (user?.full_name || 'Bạn') : 'Khách vãng lai')}
             </a>
-            <div>
-              <Tag color={b.pet_info?.species === 'dog' ? 'blue' : 'purple'}>
-                {b.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'} ({b.pet_info?.size_class || '—'})
-              </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>{b.pet_info?.breed}</Text>
-            </div>
+            {b.pet_info?.name && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                <PetAvatar species={b.pet_info?.species} size={18} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#0f766e' }}>
+                  {b.pet_info?.name}
+                </span>
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  ({b.pet_info?.species === 'dog' ? 'Chó' : 'Mèo'}{b.pet_info?.size_class ? ` · ${b.pet_info.size_class}` : ''}{b.pet_info?.breed ? ` · ${b.pet_info.breed}` : ''})
+                </span>
+              </div>
+            )}
           </div>
         </div>
       ),
     },
-    ...(!isCustomer
-      ? [{
-          title: 'Khách hàng',
-          key: 'client',
-          render: (_, b) => (
-            <div>
-              <a
-                style={{ fontWeight: 600, color: '#0b3d3f', cursor: 'pointer' }}
-                onClick={() => nav(`/app/khach-hang?q=${b.client_info?.full_name}`)}
-                title="Bấm để xem hồ sơ chủ nuôi"
-              >
-                👤 {b.client_info?.full_name}
-              </a>
-              <div><Text type="secondary" style={{ fontSize: 12 }}>📞 {b.client_info?.phone}</Text></div>
-            </div>
-          ),
-        }]
-      : []),
     {
       title: 'Dịch vụ / Gói',
       key: 'service',
@@ -608,8 +693,45 @@ export default function Bookings() {
     },
     {
       title: 'KTV phụ trách',
-      dataIndex: 'staff_name',
-      render: (st) => st ? <Tag icon={<UserOutlined />}>{st}</Tag> : <Text type="secondary">Chưa giao</Text>,
+      key: 'staff',
+      render: (_, b) => {
+        if (!b.staff_name && !b.staff) {
+          return <Text type="secondary">Chưa giao</Text>
+        }
+        return (
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: b.staff ? 'pointer' : 'default' }}
+            onClick={(e) => {
+              if (b.staff) {
+                e.stopPropagation()
+                nav(`/app/nhan-su?staff_id=${b.staff}`)
+              }
+            }}
+            title={b.staff ? 'Bấm để xem hồ sơ nhân sự' : ''}
+          >
+            <Avatar
+              size={30}
+              style={{
+                background: '#0f8b8d',
+                color: '#fff',
+                fontWeight: 600,
+                flexShrink: 0,
+              }}
+              icon={<UserOutlined />}
+            />
+            <span
+              style={{
+                fontWeight: 600,
+                color: b.staff ? '#0f766e' : '#334155',
+                fontSize: 13,
+                cursor: b.staff ? 'pointer' : 'default',
+              }}
+            >
+              {b.staff_name || 'Kỹ thuật viên'}
+            </span>
+          </div>
+        )
+      },
     },
     {
       title: 'Trạng thái',
@@ -674,69 +796,30 @@ export default function Bookings() {
 
   return (
     <div>
-      <div className="booking-page-header">
-        <div>
-          <Title level={3} style={{ margin: 0 }}>
-            {isCustomer ? 'Lịch Hẹn Của Tôi' : isTech ? 'Lịch Hẹn Được Phân Công' : 'Quản Lý Lịch Hẹn Spa'}
-          </Title>
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            Theo dõi tiến trình tiếp nhận, chăm sóc và thanh toán theo thời gian thực (Bấm vào dòng để xem chi tiết)
-          </Paragraph>
-        </div>
+      <div style={{ marginBottom: 16 }}>
+        <Title level={3} style={{ margin: 0, color: '#0b3d3f' }}>
+          {isCustomer ? 'Lịch Hẹn Của Tôi' : isTech ? 'Lịch Hẹn Được Phân Công' : 'Quản Lý Lịch Hẹn Spa'}
+        </Title>
+        <Paragraph type="secondary" style={{ margin: 0 }}>
+          Theo dõi tiến trình tiếp nhận, chăm sóc và thanh toán theo thời gian thực (Bấm vào dòng để xem chi tiết)
+        </Paragraph>
       </div>
 
-      <div className="booking-toolbar">
-        <Space wrap className="booking-toolbar-filters">
-          <Segmented
-            value={viewMode}
-            onChange={(val) => {
-              setViewMode(val)
-              setPage(1)
-            }}
-            options={[
-              { label: 'Danh sách', value: 'table', icon: <TableOutlined /> },
-              { label: 'Lịch tuần', value: 'week', icon: <CalendarOutlined /> },
-            ]}
-          />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <Segmented
+          value={viewMode}
+          onChange={(val) => {
+            setViewMode(val)
+            setPage(1)
+          }}
+          options={[
+            { label: 'Danh sách', value: 'table', icon: <TableOutlined /> },
+            { label: 'Lịch tuần', value: 'week', icon: <CalendarOutlined /> },
+          ]}
+        />
 
-          {viewMode === 'table' && (
-            <div className="booking-date-filter-field">
-              <Text className="booking-date-filter-label"><CalendarOutlined /> Ngày hẹn</Text>
-              <DatePicker
-                className="booking-date-filter"
-                value={selectedDate}
-                onChange={(date) => {
-                  setSelectedDate(date)
-                  setPage(1)
-                }}
-                allowClear
-                format="DD/MM/YYYY"
-                placeholder="Chọn ngày"
-              />
-            </div>
-          )}
-
-          <Select
-            value={statusFilter}
-            onChange={(value) => {
-              setStatusFilter(value)
-              setPage(1)
-            }}
-            style={{ width: 150 }}
-            options={[
-              { value: '', label: 'Tất cả trạng thái' },
-              { value: 'pending', label: 'Chờ duyệt' },
-              { value: 'confirmed', label: 'Đã xác nhận' },
-              { value: 'checked_in', label: 'Đã nhận thú' },
-              { value: 'in_progress', label: 'Đang thực hiện' },
-              { value: 'completed', label: 'Hoàn tất' },
-              { value: 'cancelled', label: 'Đã hủy' },
-            ]}
-          />
-        </Space>
-        <Space wrap className="booking-toolbar-actions">
+        <Space wrap size={10}>
           <Button icon={<ReloadOutlined />} onClick={loadBookings}>Làm mới</Button>
-
           {isFrontDesk && (
             <Button
               type="primary"
@@ -747,16 +830,15 @@ export default function Bookings() {
               Bảng Lễ Tân Điều Phối
             </Button>
           )}
-
           {!isTech && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={openCreateModal}
+              style={{ background: '#0f8b8d', borderColor: '#0f8b8d', fontWeight: 600, height: 38 }}
+            >
               {isCustomer ? 'Đặt lịch ngay' : 'Tạo lịch mới'}
             </Button>
-          )}
-          {viewMode === 'table' && (
-            <div className="booking-page-size-control">
-              <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
-            </div>
           )}
         </Space>
       </div>
@@ -779,27 +861,99 @@ export default function Bookings() {
         ))}
       </div>
 
-      {viewMode === 'table' && user?.role !== 'customer' && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 0 12px' }}>
-          <Input.Search
-            allowClear
-            enterButton
-            value={bookingSearchInput}
-            onChange={(event) => {
-              const value = event.target.value
-              setBookingSearchInput(value)
-              if (!value) {
-                setBookingSearch('')
+      {viewMode === 'table' && (
+        <div
+          style={{
+            background: '#fff',
+            padding: '12px 16px',
+            borderRadius: 10,
+            border: '1px solid #e8f0f0',
+            marginBottom: 12,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <Space wrap size={10} style={{ flex: 1 }}>
+            {user?.role !== 'customer' && (
+              <Input.Search
+                placeholder="Tìm thú cưng, khách hàng, số điện thoại..."
+                allowClear
+                value={bookingSearchInput}
+                onChange={(e) => {
+                  setBookingSearchInput(e.target.value)
+                  if (!e.target.value && bookingSearch) {
+                    setPage(1)
+                    setBookingSearch('')
+                  }
+                }}
+                onSearch={(v) => {
+                  setPage(1)
+                  setBookingSearch(v ? v.trim() : '')
+                }}
+                style={{ width: 280 }}
+              />
+            )}
+
+            <DatePicker
+              value={selectedDate}
+              onChange={(date) => {
+                setSelectedDate(date)
                 setPage(1)
-              }
-            }}
-            onSearch={(value) => {
-              setBookingSearch(value.trim())
-              setPage(1)
-            }}
-            placeholder="Tìm thú cưng, khách hàng, số điện thoại"
-            style={{ width: 340, maxWidth: '100%' }}
-          />
+              }}
+              allowClear
+              format="DD/MM/YYYY"
+              placeholder="Chọn ngày hẹn"
+              style={{ width: 145 }}
+            />
+
+            {!isCustomer && staffList.length > 0 && (
+              <Select
+                placeholder="KTV phụ trách"
+                allowClear
+                value={staffFilter || undefined}
+                onChange={(val) => {
+                  setStaffFilter(val || '')
+                  setPage(1)
+                }}
+                style={{ width: 165 }}
+                options={staffList.map((st) => ({
+                  value: st.id,
+                  label: st.full_name || st.username,
+                }))}
+              />
+            )}
+
+            <Select
+              placeholder="Hình thức dịch vụ"
+              allowClear
+              value={serviceTypeFilter || undefined}
+              onChange={(val) => {
+                setServiceTypeFilter(val || '')
+                setPage(1)
+              }}
+              style={{ width: 155 }}
+              options={[
+                { value: 'package', label: '📦 Gói combo' },
+                { value: 'services', label: '✂️ Dịch vụ lẻ' },
+              ]}
+            />
+
+            <Segmented
+              value={statusFilter}
+              onChange={(val) => {
+                setStatusFilter(val)
+                setPage(1)
+              }}
+              options={statusTabOptions}
+            />
+          </Space>
+
+          <div>
+            <RowPerPageSelect value={pageSize} onChange={(ps) => { setPageSize(ps); setPage(1); }} />
+          </div>
         </div>
       )}
 
@@ -1005,14 +1159,26 @@ export default function Bookings() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="Chủ thú">
-                <a
-                  style={{ fontWeight: 600, color: '#0b3d3f', cursor: 'pointer' }}
-                  onClick={() => { setDetailOpen(false); nav(`/app/khach-hang?q=${detailBooking.client_info?.full_name}`) }}
-                  title="Xem hồ sơ chủ nuôi"
-                >
-                  👤 {detailBooking.client_info?.full_name}
-                </a> - 📞 {detailBooking.client_info?.phone}
-              </Descriptions.Item>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar style={{ background: '#0f8b8d', flexShrink: 0 }} icon={<UserOutlined />} size={32} />
+                  <div>
+                    <a
+                      style={{ fontWeight: 600, color: '#0b3d3f', cursor: 'pointer' }}
+                      onClick={() => {
+                        setDetailOpen(false)
+                        nav(`/app/khach-hang?q=${encodeURIComponent(detailBooking.client_info?.phone || detailBooking.client_info?.full_name || '')}`)
+                      }}
+                      title="Xem hồ sơ chủ nuôi"
+                    >
+                      {detailBooking.client_info?.full_name || 'Khách vãng lai'}
+                    </a>
+                    {detailBooking.client_info?.phone && (
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>📞 {detailBooking.client_info?.phone}</Text>
+                      </div>
+                    )}
+                  </div>
+                </div></Descriptions.Item>
               <Descriptions.Item label="Khung giờ">
                 {dayjs(detailBooking.start_at).format('HH:mm DD/MM/YYYY')} - {dayjs(detailBooking.end_at).format('HH:mm')}
               </Descriptions.Item>
@@ -1171,8 +1337,10 @@ export default function Bookings() {
       {/* ===== MODAL ĐẶT LỊCH HẸN ===== */}
       <Modal
         centered
-        title={isCustomer ? '🐾 Đặt Lịch Chăm Sóc Cho Bé' : 'Tạo Lịch Hẹn Mới Tại Quầy'}
+        title={isCustomer ? 'Đặt Lịch Chăm Sóc Cho Bé' : 'Tạo Lịch Hẹn Mới Tại Quầy'}
         open={createModalOpen}
+        onCancel={() => setCreateModalOpen(false)}
+        width={700}
         onCancel={() => setCreateModalOpen(false)}
         width={680}
         footer={[
@@ -1182,33 +1350,135 @@ export default function Bookings() {
         ]}
       >
         <Form form={form} layout="vertical" initialValues={{ booking_type: 'package' }}>
-          <Form.Item
-            name="pet"
-            label={
-              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                <span>Chọn bé cưng</span>
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<RobotOutlined />}
-                  onClick={openAiModalForSelectedPet}
-                  style={{ padding: 0, height: 'auto', color: '#0f8b8d', fontWeight: 600 }}
-                >
-                  AI Gợi ý gói cho bé này
-                </Button>
-              </div>
-            }
-            rules={[{ required: true, message: 'Vui lòng chọn thú cưng' }]}
-          >
-            <Select
-              placeholder="Chọn thú cưng"
-              onChange={() => setQuoteData(null)}
-              options={(isCustomer ? myPets : allPets).map((p) => ({
-                value: p.id,
-                label: `${p.name} (${p.species === 'dog' ? 'Chó' : 'Mèo'} - ${p.breed || 'chưa rõ'}) [Size: ${p.size_class || 'chưa rõ'}]`,
-              }))}
-            />
-          </Form.Item>
+          {!isCustomer ? (
+            <>
+              <Row gutter={12}>
+                <Col span={12}>
+                  <Form.Item
+                    name="client"
+                    label="Chọn khách hàng"
+                    rules={[{ required: true, message: 'Vui lòng chọn khách hàng' }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Tìm theo tên hoặc SĐT khách..."
+                      optionFilterProp="searchStr"
+                      filterOption={(input, opt) => (opt?.searchStr ?? '').toLowerCase().includes(input.toLowerCase())}
+                      value={selectedClientId}
+                      onChange={(val) => {
+                        setSelectedClientId(val)
+                        form.setFieldValue('client', val)
+                        form.setFieldValue('pet', undefined)
+                        setQuoteData(null)
+                        const cPets = allPets.filter((p) => p.client === val && p.is_active !== false)
+                        if (cPets.length === 1) {
+                          form.setFieldValue('pet', cPets[0].id)
+                        }
+                      }}
+                      options={clients.map((c) => ({
+                        value: c.id,
+                        searchStr: `${c.full_name} ${c.phone || ''}`,
+                        label: (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>
+                              <Avatar style={{ background: '#0f8b8d', marginRight: 6 }} icon={<UserOutlined />} size={18} />
+                              <strong>{c.full_name}</strong> {c.phone ? `(${c.phone})` : ''}
+                            </span>
+                            <Tag color="cyan" style={{ margin: 0, fontSize: 11 }}>
+                              {allPets.filter((p) => p.client === c.id && p.is_active !== false).length} bé
+                            </Tag>
+                          </div>
+                        ),
+                      }))}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="pet"
+                    label={
+                      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                        <span>Chọn bé cưng</span>
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<RobotOutlined />}
+                          onClick={openAiModalForSelectedPet}
+                          disabled={!selectedPetId}
+                          style={{ padding: 0, height: 'auto', color: '#0f8b8d', fontWeight: 600 }}
+                        >
+                          AI Gợi ý gói
+                        </Button>
+                      </div>
+                    }
+                    rules={[{ required: true, message: 'Vui lòng chọn thú cưng' }]}
+                  >
+                    <Select
+                      placeholder={selectedClientId ? 'Chọn bé cưng của khách...' : 'Chọn khách hàng trước...'}
+                      disabled={!selectedClientId}
+                      onChange={() => setQuoteData(null)}
+                      options={(allPets.filter((p) => p.client === selectedClientId && p.is_active !== false)).map((p) => ({
+                        value: p.id,
+                        label: (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <PetAvatar species={p.species} size={20} />
+                            <span>
+                              <strong>{p.name}</strong> ({p.species === 'dog' ? 'Chó' : 'Mèo'} - {p.breed || 'chưa rõ'}) [Size: {p.size_class || '—'}]
+                            </span>
+                          </div>
+                        ),
+                      }))}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              {selectedClientId && allPets.filter((p) => p.client === selectedClientId && p.is_active !== false).length === 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 16, borderRadius: 8 }}
+                  message="Khách hàng này chưa có thú cưng đăng ký"
+                  description="Vui lòng thêm thú cưng trong mục Quản lý Khách hàng trước khi đặt lịch tại quầy."
+                />
+              )}
+            </>
+          ) : (
+            <Form.Item
+              name="pet"
+              label={
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                  <span>Chọn bé cưng</span>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<RobotOutlined />}
+                    onClick={openAiModalForSelectedPet}
+                    disabled={!selectedPetId}
+                    style={{ padding: 0, height: 'auto', color: '#0f8b8d', fontWeight: 600 }}
+                  >
+                    AI Gợi ý gói cho bé này
+                  </Button>
+                </div>
+              }
+              rules={[{ required: true, message: 'Vui lòng chọn thú cưng' }]}
+            >
+              <Select
+                placeholder="Chọn thú cưng của bạn"
+                onChange={() => setQuoteData(null)}
+                options={myPets.map((p) => ({
+                  value: p.id,
+                  label: (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <PetAvatar species={p.species} size={20} />
+                      <span>
+                        <strong>{p.name}</strong> ({p.species === 'dog' ? 'Chó' : 'Mèo'} - {p.breed || 'chưa rõ'}) [Size: {p.size_class || '—'}]
+                      </span>
+                    </div>
+                  ),
+                }))}
+              />
+            </Form.Item>
+          )}
 
           <Form.Item name="booking_type" label="Hình thức dịch vụ">
             <Radio.Group onChange={() => { form.setFieldsValue({ package: undefined, services: undefined }); setQuoteData(null) }}>
@@ -1461,10 +1731,14 @@ export default function Bookings() {
               onChange={() => setEditQuoteData(null)}
               options={(isCustomer ? myPets : allPets).map((p) => ({
                 value: p.id,
-                label: `🐾 ${p.name} (${p.species === 'dog' ? 'Chó' : 'Mèo'} - ${p.breed || 'Không rõ'})`,
+                label: (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <PetAvatar species={p.species} size={18} />
+                    <span>{p.name} ({p.species === 'dog' ? 'Chó' : 'Mèo'} - {p.breed || 'Không rõ'}) [Size: {p.size_class || '—'}]</span>
+                  </div>
+                ),
               }))}
-            />
-          </Form.Item>
+            /></Form.Item>
 
           <Form.Item name="booking_type" label="Hình thức dịch vụ">
             <Radio.Group onChange={() => setEditQuoteData(null)}>

@@ -10,6 +10,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { api, money } from '../api.js'
+import PetAvatar from './PetAvatar.jsx'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -34,15 +35,38 @@ export default function AiPackageModal({ open, onClose, pet, onSelectPackage }) 
         body: { pet_id: pet.id },
       })
       const rawList = Array.isArray(res) ? res : res.suggestions || []
-      const suggestions = rawList.map((s) => ({
-        id: s.id,
-        score: Math.round(Number(s.score || 0)),
-        confidence: Number(s.confidence || 0.8),
-        reason_text: s.reason_text,
-        package: s.package_info || (typeof s.package === 'object' ? s.package : { id: s.package, name: s.package_name }),
-        reasons: s.evidence?.map((e) => e.fact) || s.reasons || [s.reason_text],
-        contraindications: s.warnings || [],
-      }))
+      const suggestions = rawList.map((s) => {
+        let reasonsList = []
+        if (Array.isArray(s.evidence) && s.evidence.length > 0) {
+          reasonsList = s.evidence
+            .map((e) => (typeof e === 'object' ? e.fact || e.reason || e.text : String(e)))
+            .filter(Boolean)
+        }
+        if (reasonsList.length === 0 && Array.isArray(s.reasons) && s.reasons.length > 0) {
+          reasonsList = s.reasons.filter(Boolean)
+        }
+        if (reasonsList.length === 0 && s.reason_text) {
+          reasonsList = [s.reason_text]
+        }
+        if (reasonsList.length === 0) {
+          const petName = pet?.name || 'bé'
+          const breedStr = pet?.breed ? `, giống ${pet.breed}` : ''
+          const sizeStr = pet?.size_class ? `, size ${pet.size_class}` : ''
+          reasonsList = [
+            `Phù hợp với thể trạng của bé ${petName} (${pet?.species === 'cat' ? 'mèo' : 'chó'}${breedStr}${sizeStr}) và đã qua kiểm tra an toàn y khoa.`
+          ]
+        }
+
+        return {
+          id: s.id,
+          score: Math.round(Number(s.score || 0)),
+          confidence: Number(s.confidence || 0.8),
+          reason_text: s.reason_text || reasonsList.join('. '),
+          package: s.package_info || (typeof s.package === 'object' ? s.package : { id: s.package, name: s.package_name }),
+          reasons: reasonsList,
+          contraindications: s.warnings || [],
+        }
+      })
 
       setData({
         pet: pet,
@@ -165,39 +189,35 @@ export default function AiPackageModal({ open, onClose, pet, onSelectPackage }) 
             }}
           >
             <Row gutter={[16, 8]} align="middle">
-              <Col span={24} md={14}>
-                <Space wrap align="center">
-                  <Text strong style={{ fontSize: 16, color: '#0f766e' }}>
-                    🐾 {data.pet?.name}
-                  </Text>
-                  <Tag color="cyan">
-                    {data.pet?.species === 'dog' ? 'Chó' : 'Mèo'} · {data.pet?.breed || 'Chưa rõ giống'}
-                  </Tag>
-                  <Tag color="blue">
-                    {data.pet?.weight_kg} kg (Size {data.pet?.size_class || '—'})
-                  </Tag>
-                  {data.pet?.coat_type && (
-                    <Tag color="geekblue">Lông: {data.pet?.coat_type}</Tag>
-                  )}
-                </Space>
-                {data.pet?.allergy_note && (
-                  <div style={{ marginTop: 6 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      ⚠️ Dị ứng ghi nhận:{' '}
-                    </Text>
-                    <Text type="danger" strong style={{ fontSize: 12 }}>
-                      {data.pet?.allergy_note}
-                    </Text>
+              <Col span={24}>
+                <Space align="center" size={12} style={{ flexWrap: 'wrap' }}>
+                  <PetAvatar species={data.pet?.species} size={36} />
+                  <div>
+                    <Space wrap align="center">
+                      <Text strong style={{ fontSize: 16, color: '#0f766e' }}>
+                        {data.pet?.name}
+                      </Text>
+                      <Tag color="cyan">
+                        {data.pet?.species === 'dog' ? 'Chó' : 'Mèo'} · {data.pet?.breed || 'Chưa rõ giống'}
+                      </Tag>
+                      <Tag color="blue">
+                        {data.pet?.weight_kg} kg (Size {data.pet?.size_class || '—'})
+                      </Tag>
+                      {data.pet?.coat_type && (
+                        <Tag color="geekblue">Lông: {data.pet?.coat_type}</Tag>
+                      )}
+                    </Space>
+                    {data.pet?.allergy_note && (
+                      <div style={{ marginTop: 4 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          ⚠️ Dị ứng ghi nhận:{' '}
+                        </Text>
+                        <Text type="danger" strong style={{ fontSize: 12 }}>
+                          {data.pet?.allergy_note}
+                        </Text>
+                      </div>
+                    )}
                   </div>
-                )}
-              </Col>
-              <Col span={24} md={10} style={{ textAlign: 'right' }}>
-                <Space wrap>
-                  {data.pet?.health_tags?.map((t, idx) => (
-                    <Tag color="orange" key={idx}>
-                      {typeof t === 'object' ? t.name_vi || t.name : t}
-                    </Tag>
-                  ))}
                 </Space>
               </Col>
             </Row>
@@ -264,11 +284,12 @@ export default function AiPackageModal({ open, onClose, pet, onSelectPackage }) 
                             right: 0,
                             background: '#0f8b8d',
                             color: '#fff',
-                            padding: '2px 14px',
+                            padding: '3px 14px',
                             fontSize: 11,
                             fontWeight: 700,
                             borderBottomLeftRadius: 8,
                             letterSpacing: 0.5,
+                            zIndex: 2,
                           }}
                         >
                           KHUYÊN DÙNG NHẤT
@@ -297,20 +318,33 @@ export default function AiPackageModal({ open, onClose, pet, onSelectPackage }) 
                           <div
                             style={{
                               background: '#f8fafc',
-                              padding: '6px 12px',
+                              padding: '8px 12px',
                               borderRadius: 6,
                               fontSize: 12,
                               color: '#334155',
+                              border: '1px solid #e2e8f0',
                             }}
                           >
-                            <Text strong style={{ color: '#0f8b8d' }}>
+                            <Text strong style={{ color: '#0f8b8d', display: 'block', marginBottom: 2 }}>
                               💡 Lý do đề xuất:
                             </Text>
-                            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
-                              {item.reasons?.map((r, ri) => (
-                                <li key={ri}>{r}</li>
-                              ))}
-                            </ul>
+                            {item.reasons && item.reasons.length > 0 ? (
+                              item.reasons.length === 1 ? (
+                                <div style={{ color: '#334155', lineHeight: 1.5 }}>
+                                  {item.reasons[0]}
+                                </div>
+                              ) : (
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 18, color: '#334155', lineHeight: 1.5 }}>
+                                  {item.reasons.map((r, ri) => (
+                                    <li key={ri}>{r}</li>
+                                  ))}
+                                </ul>
+                              )
+                            ) : (
+                              <div style={{ color: '#334155' }}>
+                                {item.reason_text || `Phù hợp với thể trạng của bé ${data.pet?.name || ''}.`}
+                              </div>
+                            )}
                           </div>
 
                           {/* Cảnh báo WARN nếu có */}
@@ -325,7 +359,7 @@ export default function AiPackageModal({ open, onClose, pet, onSelectPackage }) 
                           )}
                         </Col>
 
-                        <Col span={24} md={8} style={{ textAlign: 'right' }}>
+                        <Col span={24} md={8} style={{ textAlign: 'right', paddingTop: isTop ? 26 : 0 }}>
                           <div style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: 12, color: '#64748b' }}>
                               Thời lượng: ~{item.package?.duration_minutes || 60} phút

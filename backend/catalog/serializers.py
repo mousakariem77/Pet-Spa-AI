@@ -6,7 +6,7 @@ from .models import HealthTag, Package, PackageItem, Service, SizeBand, Specialt
 class SpecialtySerializer(serializers.ModelSerializer):
     class Meta:
         model = Specialty
-        fields = ['id', 'code', 'name_vi', 'species_scope', 'description']
+        fields = ['id', 'code', 'name_vi', 'species_scope', 'description', 'is_active']
 
 
 class HealthTagSerializer(serializers.ModelSerializer):
@@ -45,10 +45,11 @@ class ServiceSerializer(serializers.ModelSerializer):
 class PackageItemSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source='service.name', read_only=True)
     duration_minutes = serializers.IntegerField(source='service.duration_minutes', read_only=True)
+    is_active = serializers.BooleanField(source='service.is_active', read_only=True)
 
     class Meta:
         model = PackageItem
-        fields = ['service', 'service_name', 'duration_minutes', 'position']
+        fields = ['service', 'service_name', 'duration_minutes', 'position', 'is_active']
 
 
 class PackageSerializer(serializers.ModelSerializer):
